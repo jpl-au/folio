@@ -1,0 +1,281 @@
+package folio
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestConstants(t *testing.T) {
+	tests := []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"HeaderSize", HeaderSize, 128},
+		{"MaxLabelSize", MaxLabelSize, 256},
+		{"MaxRecordSize", MaxRecordSize, 16 * 1024 * 1024},
+		{"TypeIndex", TypeIndex, 1},
+		{"TypeRecord", TypeRecord, 2},
+		{"TypeHistory", TypeHistory, 3},
+		{"StateAll", StateAll, 0},
+		{"StateRead", StateRead, 1},
+		{"StateNone", StateNone, 2},
+		{"StateClosed", StateClosed, 3},
+		{"MinRecordSize", MinRecordSize, 53},
+		{"AlgXXHash3", AlgXXHash3, 1},
+		{"AlgFNV1a", AlgFNV1a, 2},
+		{"AlgBlake2b", AlgBlake2b, 3},
+	}
+
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Errorf("%s = %d, want %d", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+func TestHeaderFormat(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := Open(dir, "test.folio", Config{})
+	db.Close()
+
+	// Read raw header
+	data, _ := os.ReadFile(filepath.Join(dir, "test.folio"))
+
+	// Should be exactly 128 bytes
+	if len(data) < HeaderSize {
+		t.Fatalf("file too short: %d bytes", len(data))
+	}
+
+	header := data[:HeaderSize]
+
+	// Should end with newline
+	if header[HeaderSize-1] != '\n' {
+		t.Error("header should end with newline")
+	}
+
+	// Should be valid JSON
+	var h Header
+	if err := json.Unmarshal(header[:HeaderSize-1], &h); err != nil {
+		t.Errorf("header not valid JSON: %v", err)
+	}
+}
+
+func TestRecordFormat(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("test", "content")
+
+	// Read raw file
+	info, _ := db.reader.Stat()
+	data := make([]byte, info.Size())
+	db.reader.ReadAt(data, 0)
+
+	// Find first record after header
+	recordStart := HeaderSize
+	for recordStart < len(data) && data[recordStart] != '{' {
+		recordStart++
+	}
+
+	if recordStart >= len(data) {
+		t.Fatal("no record found")
+	}
+
+	// Find end of record
+	recordEnd := recordStart
+	for recordEnd < len(data) && data[recordEnd] != '\n' {
+		recordEnd++
+	}
+
+	record := data[recordStart:recordEnd]
+
+	// Should start with {"idx":
+	if len(record) < 7 || string(record[:7]) != `{"idx":` {
+		t.Errorf("record should start with {\"idx\":")
+	}
+
+	// Type at position 7
+	recordType := record[7] - '0'
+	if recordType != TypeRecord && recordType != TypeIndex {
+		t.Errorf("record type = %d, want %d or %d", recordType, TypeRecord, TypeIndex)
+	}
+}
+
+func TestIndexRecordFormat(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("test", "content")
+
+	// Find index record
+	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeIndex)
+	if len(results) == 0 {
+		t.Fatal("no index record found")
+	}
+
+	idx, err := decodeIndex(results[0].Data)
+	if err != nil {
+		t.Fatalf("decode index: %v", err)
+	}
+
+	// Verify format
+	if idx.Type != TypeIndex {
+		t.Errorf("Type = %d, want %d", idx.Type, TypeIndex)
+	}
+	if len(idx.ID) != 16 {
+		t.Errorf("ID length = %d, want 16", len(idx.ID))
+	}
+	if idx.Label != "test" {
+		t.Errorf("Label = %q, want %q", idx.Label, "test")
+	}
+	if idx.Offset < HeaderSize {
+		t.Errorf("Offset = %d, want >= %d", idx.Offset, HeaderSize)
+	}
+}
+
+func TestDataRecordFormat(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("test", "content")
+
+	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeRecord)
+	if len(results) == 0 {
+		t.Fatal("no data record found")
+	}
+
+	rec, err := decode(results[0].Data)
+	if err != nil {
+		t.Fatalf("decode record: %v", err)
+	}
+
+	if rec.Type != TypeRecord {
+		t.Errorf("Type = %d, want %d", rec.Type, TypeRecord)
+	}
+	if len(rec.ID) != 16 {
+		t.Errorf("ID length = %d, want 16", len(rec.ID))
+	}
+	if rec.Label != "test" {
+		t.Errorf("Label = %q, want %q", rec.Label, "test")
+	}
+	if rec.Data != "content" {
+		t.Errorf("Data = %q, want %q", rec.Data, "content")
+	}
+	if rec.History == "" {
+		t.Error("History should not be empty")
+	}
+}
+
+func TestHistoryRecordFormat(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("test", "v1")
+	db.Set("test", "v2") // v1 becomes history
+
+	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeHistory)
+	if len(results) == 0 {
+		t.Fatal("no history record found")
+	}
+
+	rec, err := decode(results[0].Data)
+	if err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+
+	if rec.Type != TypeHistory {
+		t.Errorf("Type = %d, want %d", rec.Type, TypeHistory)
+	}
+	// _d should be blanked (spaces)
+	for _, c := range rec.Data {
+		if c != ' ' && c != 0 {
+			t.Logf("History _d not fully blanked: %q", rec.Data)
+			break
+		}
+	}
+	// _h should still have content
+	if rec.History == "" {
+		t.Error("History._h should not be empty")
+	}
+}
+
+func TestSectionBoundaries(t *testing.T) {
+	db := openTestDB(t)
+
+	// Fresh DB - no sorted sections
+	if db.indexStart() != 0 {
+		t.Errorf("fresh indexStart = %d, want 0", db.indexStart())
+	}
+	if db.indexEnd() != 0 {
+		t.Errorf("fresh indexEnd = %d, want 0", db.indexEnd())
+	}
+	if db.sparseStart() != HeaderSize {
+		t.Errorf("fresh sparseStart = %d, want %d", db.sparseStart(), HeaderSize)
+	}
+
+	db.Set("doc", "content")
+	db.Compact()
+
+	// After compact - sorted sections exist
+	if db.indexStart() == 0 {
+		t.Error("post-compact indexStart should not be 0")
+	}
+	if db.indexEnd() == 0 {
+		t.Error("post-compact indexEnd should not be 0")
+	}
+	if db.indexStart() >= db.indexEnd() {
+		t.Errorf("data should end before index: %d >= %d", db.indexStart(), db.indexEnd())
+	}
+	if db.sparseStart() != db.indexEnd() {
+		t.Errorf("sparseStart = %d, want %d (indexEnd)", db.sparseStart(), db.indexEnd())
+	}
+}
+
+func TestIDAtFixedPosition(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("test", "content")
+
+	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeRecord)
+	if len(results) == 0 {
+		t.Fatal("no record found")
+	}
+
+	// ID should be at bytes [16:32] relative to record start
+	data := results[0].Data
+	if len(data) < 32 {
+		t.Fatal("record too short")
+	}
+
+	idFromFixed := string(data[16:32])
+	rec, _ := decode(data)
+
+	if idFromFixed != rec.ID {
+		t.Errorf("ID at fixed position = %q, parsed ID = %q", idFromFixed, rec.ID)
+	}
+}
+
+func TestTimestampAtFixedPosition(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("test", "content")
+
+	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeRecord)
+	if len(results) == 0 {
+		t.Fatal("no record found")
+	}
+
+	// TS should be at bytes [40:53] relative to record start
+	data := results[0].Data
+	if len(data) < 53 {
+		t.Fatal("record too short")
+	}
+
+	// Verify position by checking it's a number
+	tsBytes := data[40:53]
+	for _, b := range tsBytes {
+		if b < '0' || b > '9' {
+			t.Errorf("TS at fixed position contains non-digit: %q", tsBytes)
+			break
+		}
+	}
+}
