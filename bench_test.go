@@ -193,6 +193,88 @@ func BenchmarkDecompress1KB(b *testing.B) {
 	}
 }
 
+func benchSearchDB(b *testing.B) *DB {
+	b.Helper()
+	dir := b.TempDir()
+	db, err := Open(dir, "bench.folio", Config{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { db.Close() })
+
+	for i := 0; i < 100; i++ {
+		db.Set("doc"+strconv.Itoa(i),
+			`hello "world" with some\nescaped content `+strconv.Itoa(i)+
+				` and more text to make it roughly one kilobyte `+
+				strings.Repeat("padding ", 100))
+	}
+	return db
+}
+
+func BenchmarkSearchRaw(b *testing.B) {
+	db := benchSearchDB(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Search("hello", SearchOptions{})
+	}
+}
+
+func BenchmarkSearchDecode(b *testing.B) {
+	db := benchSearchDB(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Search("hello", SearchOptions{Decode: true})
+	}
+}
+
+func BenchmarkSearchRawMiss(b *testing.B) {
+	db := benchSearchDB(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Search("zzznomatch", SearchOptions{})
+	}
+}
+
+func BenchmarkSearchDecodeMiss(b *testing.B) {
+	db := benchSearchDB(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Search("zzznomatch", SearchOptions{Decode: true})
+	}
+}
+
+func BenchmarkMatchLabel(b *testing.B) {
+	db := benchSearchDB(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.MatchLabel("doc")
+	}
+}
+
+func BenchmarkMatchLabelMiss(b *testing.B) {
+	db := benchSearchDB(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.MatchLabel("zzznomatch")
+	}
+}
+
+func BenchmarkUnescape(b *testing.B) {
+	data := []byte(`hello \"world\" path\\to\\file line1\nline2`)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		unescape(data)
+	}
+}
+
+func BenchmarkUnescapeClean(b *testing.B) {
+	data := []byte("hello world no escapes here at all")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		unescape(data)
+	}
+}
+
 func BenchmarkRehash(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()

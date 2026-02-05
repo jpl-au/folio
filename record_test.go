@@ -177,3 +177,37 @@ func TestNowIncreases(t *testing.T) {
 		t.Errorf("now() did not increase: %d then %d", t1, t2)
 	}
 }
+
+func TestUnescape(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no escapes", "hello world", "hello world"},
+		{"quote", `hello \"world\"`, `hello "world"`},
+		{"backslash", `a\\b`, `a\b`},
+		{"slash", `a\/b`, `a/b`},
+		{"newline", `line1\\nline2`, "line1\\nline2"},
+		{"literal newline", `line1\nline2`, "line1\nline2"},
+		{"tab", `col1\tcol2`, "col1\tcol2"},
+		{"carriage return", `a\rb`, "a\rb"},
+		{"backspace", `a\bb`, "a\bb"},
+		{"formfeed", `a\fb`, "a\fb"},
+		{"unicode basic", `\u0041`, "A"},
+		{"unicode multi", `\u00e9`, "\u00e9"},
+		{"mixed", `say \"hi\"\nbye\\end`, "say \"hi\"\nbye\\end"},
+		{"empty", "", ""},
+		{"trailing backslash", `abc\`, `abc\`},
+		{"short unicode", `\u00`, `\u00`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := string(unescape([]byte(tt.in)))
+			if got != tt.want {
+				t.Errorf("unescape(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

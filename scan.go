@@ -33,9 +33,9 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 		recordStart := newlinePos + 1
 		data, err := line(f, recordStart)
 		if err == nil && len(data) > 0 && valid(data) {
-			record, err := decode(data)
-			if err == nil && record.Type == recordType {
-				pivot = &Result{recordStart, len(data), data, record.ID}
+			if len(data) >= MinRecordSize && data[7] == byte('0'+recordType) {
+				id := string(data[16:32])
+				pivot = &Result{recordStart, len(data), data, id}
 				pivotEnd = recordStart + int64(len(data)) + 1
 			}
 		}
@@ -87,13 +87,9 @@ func scanBack(f *os.File, pos, start int64, recordType int) *Result {
 			continue
 		}
 
-		record, err := decode(data)
-		if err != nil {
-			continue
-		}
-
-		if record.Type == recordType {
-			return &Result{recordStart, len(data), data, record.ID}
+		if len(data) >= MinRecordSize && data[7] == byte('0'+recordType) {
+			id := string(data[16:32])
+			return &Result{recordStart, len(data), data, id}
 		}
 	}
 	return nil
@@ -108,9 +104,9 @@ func scanFwd(f *os.File, pos, end int64, recordType int) *Result {
 		}
 
 		if valid(data) {
-			record, err := decode(data)
-			if err == nil && record.Type == recordType {
-				return &Result{pos, len(data), data, record.ID}
+			if len(data) >= MinRecordSize && data[7] == byte('0'+recordType) {
+				id := string(data[16:32])
+				return &Result{pos, len(data), data, id}
 			}
 		}
 

@@ -6,9 +6,12 @@
 package folio
 
 import (
+	"bytes"
 	"encoding/json"
+	"encoding/hex"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Record type markers.
@@ -107,4 +110,58 @@ func label(line []byte) string {
 // now returns the current time in unix milliseconds.
 func now() int64 {
 	return time.Now().UnixMilli()
+}
+
+// unescape decodes JSON string escape sequences in-place.
+// Handles: \" \\ \/ \n \r \t \b \f \uXXXX.
+// Returns input unchanged if no backslash is present.
+func unescape(b []byte) []byte {
+	if bytes.IndexByte(b, '\\') < 0 {
+		return b
+	}
+
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		if b[i] != '\\' || i+1 >= len(b) {
+			out = append(out, b[i])
+			continue
+		}
+		i++
+		switch b[i] {
+		case '"':
+			out = append(out, '"')
+		case '\\':
+			out = append(out, '\\')
+		case '/':
+			out = append(out, '/')
+		case 'n':
+			out = append(out, '\n')
+		case 'r':
+			out = append(out, '\r')
+		case 't':
+			out = append(out, '\t')
+		case 'b':
+			out = append(out, '\b')
+		case 'f':
+			out = append(out, '\f')
+		case 'u':
+			if i+4 >= len(b) {
+				out = append(out, '\\', 'u')
+				continue
+			}
+			h, err := hex.DecodeString(string(b[i+1 : i+5]))
+			if err != nil {
+				out = append(out, '\\', 'u')
+				continue
+			}
+			r := rune(h[0])<<8 | rune(h[1])
+			var buf [4]byte
+			n := utf8.EncodeRune(buf[:], r)
+			out = append(out, buf[:n]...)
+			i += 4
+		default:
+			out = append(out, '\\', b[i])
+		}
+	}
+	return out
 }

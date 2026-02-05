@@ -173,3 +173,68 @@ func TestMatchLabelMultiple(t *testing.T) {
 		t.Errorf("expected 2 matches, got %d", len(matches))
 	}
 }
+
+func TestSearchDecodeQuotes(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", `hello "world"`)
+
+	// With Decode, the unescaped quotes should be searchable.
+	matches, err := db.Search(`"world"`, SearchOptions{Decode: true})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Error("decoded search should match quoted content")
+	}
+
+	// Without Decode, the raw JSON has escaped quotes (\"), not literal quotes.
+	matches, _ = db.Search(`"world"`, SearchOptions{})
+	if len(matches) != 0 {
+		t.Error("raw search should not match literal quotes in JSON-encoded content")
+	}
+}
+
+func TestSearchDecodePlain(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", "hello world")
+
+	// Decode on plain content (fast path, no escapes) should still match.
+	matches, err := db.Search("hello", SearchOptions{Decode: true})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Error("decoded search should match plain content")
+	}
+}
+
+func TestSearchDecodeBackslash(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", `path\to\file`)
+
+	matches, err := db.Search(`path\\to`, SearchOptions{Decode: true})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Error("decoded search should match backslash content")
+	}
+}
+
+func TestSearchDecodeNewline(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", "line1\nline2")
+
+	// Search for the literal newline character in decoded content.
+	matches, err := db.Search("line1\nline2", SearchOptions{Decode: true})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Error("decoded search should match newline content")
+	}
+}
