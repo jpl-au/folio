@@ -24,6 +24,11 @@ func (db *DB) Get(label string) (string, error) {
 		}
 	}
 
+	// Bloom filter: skip sparse scan if ID definitely absent
+	if db.bloom != nil && !db.bloom.Contains(id) {
+		return "", ErrNotFound
+	}
+
 	// Linear scan sparse (reverse for newest)
 	results := sparse(db.reader, id, db.sparseStart(), size(db.reader), TypeIndex)
 	for i := len(results) - 1; i >= 0; i-- {
@@ -56,6 +61,11 @@ func (db *DB) Exists(label string) (bool, error) {
 		if idx.Label == label {
 			return true, nil
 		}
+	}
+
+	// Bloom filter: skip sparse scan if ID definitely absent
+	if db.bloom != nil && !db.bloom.Contains(id) {
+		return false, nil
 	}
 
 	results := sparse(db.reader, id, db.sparseStart(), size(db.reader), TypeIndex)

@@ -24,6 +24,7 @@ type Config struct {
 	ReadBuffer    int  // Buffer size for reading (default 64KB)
 	MaxRecordSize int  // Maximum single record size (default 16MB)
 	SyncWrites    bool // Call fsync after writes
+	BloomFilter   bool // Build bloom filter on Open for sparse region
 }
 
 // DB represents an open database.
@@ -35,6 +36,7 @@ type DB struct {
 	lock   *fileLock // OS-level file lock
 	header *Header   // Cached header
 	config Config    // Configuration
+	bloom  *bloom    // nil when BloomFilter is false
 	tail   int64     // Append offset (end of file)
 	state  atomic.Int32
 	cond   *sync.Cond
@@ -120,6 +122,15 @@ func Open(dir, name string, config Config) (*DB, error) {
 		config: config,
 		tail:   info.Size(),
 		cond:   sync.NewCond(&sync.Mutex{}),
+	}
+
+	// Build bloom filter from sparse IDs
+	if config.BloomFilter {
+		db.bloom = newBloom()
+		entries := scanm(reader, db.sparseStart(), info.Size(), TypeIndex)
+		for _, e := range entries {
+			db.bloom.Add(e.ID)
+		}
 	}
 
 	// Crash detection

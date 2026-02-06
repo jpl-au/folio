@@ -77,6 +77,10 @@ func (db *DB) Set(label, content string) error {
 	}
 	_ = dataOff
 
+	if db.bloom != nil {
+		db.bloom.Add(id)
+	}
+
 	// Blank old records
 	if old != nil {
 		// Convert old data to history: idx 2 → 3

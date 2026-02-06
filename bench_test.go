@@ -275,6 +275,204 @@ func BenchmarkUnescapeClean(b *testing.B) {
 	}
 }
 
+func benchMissDB(b *testing.B, bloom bool) *DB {
+	b.Helper()
+	dir := b.TempDir()
+	db, err := Open(dir, "bench.folio", Config{BloomFilter: bloom})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { db.Close() })
+
+	for i := 0; i < 1000; i++ {
+		db.Set("doc"+strconv.Itoa(i), "content")
+	}
+	return db
+}
+
+func BenchmarkGetMissBloom(b *testing.B) {
+	db := benchMissDB(b, true)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Get("miss-" + strconv.Itoa(i))
+	}
+}
+
+func BenchmarkGetMissNoBloom(b *testing.B) {
+	db := benchMissDB(b, false)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Get("miss-" + strconv.Itoa(i))
+	}
+}
+
+func BenchmarkExistsMissBloom(b *testing.B) {
+	db := benchMissDB(b, true)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Exists("miss-" + strconv.Itoa(i))
+	}
+}
+
+func BenchmarkExistsMissNoBloom(b *testing.B) {
+	db := benchMissDB(b, false)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Exists("miss-" + strconv.Itoa(i))
+	}
+}
+
+func BenchmarkBloomAdd(b *testing.B) {
+	bl := newBloom()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bl.Add("id-" + strconv.Itoa(i))
+	}
+}
+
+func BenchmarkBloomContains(b *testing.B) {
+	bl := newBloom()
+	for i := 0; i < 1000; i++ {
+		bl.Add("id-" + strconv.Itoa(i))
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bl.Contains("miss-" + strconv.Itoa(i))
+	}
+}
+
+// benchMixedDB creates a DB with 500 docs in the sorted index and 500 in sparse.
+func benchMixedDB(b *testing.B, bloom bool) *DB {
+	b.Helper()
+	dir := b.TempDir()
+	db, err := Open(dir, "bench.folio", Config{BloomFilter: bloom})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { db.Close() })
+
+	// 500 docs compacted into sorted index
+	for i := 0; i < 500; i++ {
+		db.Set("sorted-"+strconv.Itoa(i), "content")
+	}
+	db.Compact()
+
+	// 500 docs in sparse region
+	for i := 0; i < 500; i++ {
+		db.Set("sparse-"+strconv.Itoa(i), "content")
+	}
+	return db
+}
+
+func BenchmarkGetHitSortedBloom(b *testing.B) {
+	db := benchMixedDB(b, true)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Get("sorted-" + strconv.Itoa(i%500))
+	}
+}
+
+func BenchmarkGetHitSortedNoBloom(b *testing.B) {
+	db := benchMixedDB(b, false)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Get("sorted-" + strconv.Itoa(i%500))
+	}
+}
+
+func BenchmarkGetHitSparseBloom(b *testing.B) {
+	db := benchMixedDB(b, true)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Get("sparse-" + strconv.Itoa(i%500))
+	}
+}
+
+func BenchmarkGetHitSparseNoBloom(b *testing.B) {
+	db := benchMixedDB(b, false)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Get("sparse-" + strconv.Itoa(i%500))
+	}
+}
+
+func BenchmarkGetMissMixedBloom(b *testing.B) {
+	db := benchMixedDB(b, true)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Get("miss-" + strconv.Itoa(i))
+	}
+}
+
+func BenchmarkGetMissMixedNoBloom(b *testing.B) {
+	db := benchMixedDB(b, false)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db.Get("miss-" + strconv.Itoa(i))
+	}
+}
+
+// Mixed workload: 1/3 sorted hits, 1/3 sparse hits, 1/3 misses.
+func BenchmarkGetMixedWorkloadBloom(b *testing.B) {
+	db := benchMixedDB(b, true)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		switch i % 3 {
+		case 0:
+			db.Get("sorted-" + strconv.Itoa(i%500))
+		case 1:
+			db.Get("sparse-" + strconv.Itoa(i%500))
+		case 2:
+			db.Get("miss-" + strconv.Itoa(i))
+		}
+	}
+}
+
+func BenchmarkGetMixedWorkloadNoBloom(b *testing.B) {
+	db := benchMixedDB(b, false)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		switch i % 3 {
+		case 0:
+			db.Get("sorted-" + strconv.Itoa(i%500))
+		case 1:
+			db.Get("sparse-" + strconv.Itoa(i%500))
+		case 2:
+			db.Get("miss-" + strconv.Itoa(i))
+		}
+	}
+}
+
+func BenchmarkOpenBloom(b *testing.B) {
+	dir := b.TempDir()
+	db, _ := Open(dir, "bench.folio", Config{})
+	for i := 0; i < 1000; i++ {
+		db.Set("doc"+strconv.Itoa(i), "content")
+	}
+	db.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db, _ := Open(dir, "bench.folio", Config{BloomFilter: true})
+		db.Close()
+	}
+}
+
+func BenchmarkOpenNoBloom(b *testing.B) {
+	dir := b.TempDir()
+	db, _ := Open(dir, "bench.folio", Config{})
+	for i := 0; i < 1000; i++ {
+		db.Set("doc"+strconv.Itoa(i), "content")
+	}
+	db.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		db, _ := Open(dir, "bench.folio", Config{BloomFilter: false})
+		db.Close()
+	}
+}
+
 func BenchmarkRehash(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()

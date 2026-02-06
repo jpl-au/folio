@@ -168,6 +168,10 @@ func (db *DB) Repair(opts *CompactOptions) error {
 	db.header, _ = header(db.reader)
 	db.tail = indexEnd
 
+	if db.bloom != nil {
+		db.bloom.Reset()
+	}
+
 	return nil
 }
 
