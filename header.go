@@ -6,7 +6,7 @@ package folio
 
 import (
 	"bytes"
-	"encoding/json"
+	json "github.com/goccy/go-json"
 	"os"
 )
 

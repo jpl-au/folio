@@ -5,7 +5,7 @@
 package folio
 
 import (
-	"encoding/json"
+	json "github.com/goccy/go-json"
 )
 
 // raw writes raw bytes to end of file. Sets dirty flag on first write.

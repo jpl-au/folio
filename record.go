@@ -7,7 +7,7 @@ package folio
 
 import (
 	"bytes"
-	"encoding/json"
+	json "github.com/goccy/go-json"
 	"encoding/hex"
 	"strings"
 	"time"
