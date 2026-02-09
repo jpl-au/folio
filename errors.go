@@ -3,12 +3,13 @@
 // automatic versioning — every update preserves the previous content as a
 // compressed history snapshot.
 //
-// The file is divided into sorted and sparse regions. Sorted regions support
-// binary search after compaction; the sparse region collects new writes and
-// is scanned linearly. Compaction merges the sparse region back into sorted
-// order. This design keeps all state on disk without requiring in-memory
-// indexes, though an optional bloom filter can accelerate negative lookups
-// in the sparse region.
+// The file is divided into a heap, index, and sparse region. The heap
+// co-locates data and history records sorted by ID then timestamp, so all
+// versions of a document are contiguous. Indexes follow the heap in sorted
+// order. The sparse region collects new writes and is scanned linearly.
+// Compaction merges the sparse region back into the heap. This design keeps
+// all state on disk without requiring in-memory indexes, though an optional
+// bloom filter can accelerate negative lookups in the sparse region.
 package folio
 
 import "errors"

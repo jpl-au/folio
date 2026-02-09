@@ -17,7 +17,7 @@ func TestHeaderEncode(t *testing.T) {
 		Error:     0,
 		Algorithm: AlgXXHash3,
 		Timestamp: 1706000000000,
-		Data:      5000,
+		Heap:      5000,
 		Index:     6000,
 	}
 
@@ -40,7 +40,7 @@ func TestHeaderEncodeFreshDB(t *testing.T) {
 		Error:     0,
 		Algorithm: AlgXXHash3,
 		Timestamp: 1706000000000,
-		Data:      0,
+		Heap:      0,
 		Index:     0,
 	}
 
@@ -63,7 +63,7 @@ func TestHeaderReadWrite(t *testing.T) {
 		Error:     0,
 		Algorithm: AlgFNV1a,
 		Timestamp: 1706000000000,
-		Data:      1000,
+		Heap:      1000,
 		Index:     2000,
 	}
 
@@ -97,8 +97,8 @@ func TestHeaderReadWrite(t *testing.T) {
 	if h.Timestamp != original.Timestamp {
 		t.Errorf("Timestamp = %d, want %d", h.Timestamp, original.Timestamp)
 	}
-	if h.Data != original.Data {
-		t.Errorf("Data = %d, want %d", h.Data, original.Data)
+	if h.Heap != original.Heap {
+		t.Errorf("Heap = %d, want %d", h.Heap, original.Heap)
 	}
 	if h.Index != original.Index {
 		t.Errorf("Index = %d, want %d", h.Index, original.Index)
@@ -114,7 +114,7 @@ func TestHeaderDirtyFlag(t *testing.T) {
 		Error:     0,
 		Algorithm: AlgXXHash3,
 		Timestamp: 1706000000000,
-		Data:      0,
+		Heap:      0,
 		Index:     0,
 	}
 
@@ -155,7 +155,7 @@ func TestHeaderDirtyPosition(t *testing.T) {
 		Error:     0,
 		Algorithm: AlgXXHash3,
 		Timestamp: 1706000000000,
-		Data:      0,
+		Heap:      0,
 		Index:     0,
 	}
 
@@ -185,7 +185,7 @@ func TestHeaderAllAlgorithms(t *testing.T) {
 			Error:     0,
 			Algorithm: alg,
 			Timestamp: 1706000000000,
-			Data:      0,
+			Heap:      0,
 			Index:     0,
 		}
 

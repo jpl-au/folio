@@ -92,8 +92,7 @@ func Open(dir, name string, config Config) (*DB, error) {
 			Version:   2,
 			Timestamp: now(),
 			Algorithm: config.HashAlgorithm,
-			History:   0,
-			Data:      0,
+			Heap:      0,
 			Index:     0,
 			Error:     0,
 		}
@@ -232,17 +231,12 @@ func (db *DB) Close() error {
 // start at the first possible record position.
 //
 // File layout after compaction:
-//   [Header][Records][History][Indexes][Sparse→EOF]
+//   [Header][Heap: data+history by ID,TS][Indexes][Sparse→EOF]
 
-func (db *DB) indexStart() int64 { return db.header.Data }
+func (db *DB) heapEnd() int64 { return db.header.Heap }
+
+func (db *DB) indexStart() int64 { return db.header.Heap }
 func (db *DB) indexEnd() int64   { return db.header.Index }
-
-func (db *DB) historyStart() int64 {
-	if db.header.History == 0 {
-		return HeaderSize
-	}
-	return db.header.History
-}
 
 func (db *DB) sparseStart() int64 {
 	if db.header.Index == 0 {

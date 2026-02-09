@@ -16,13 +16,13 @@ func TestRepairSortsData(t *testing.T) {
 
 	// After repair, data section should be sorted
 	// Verify by checking header boundaries are set
-	if db.header.Data == 0 {
-		t.Error("header.Data not set after repair")
+	if db.header.Heap == 0 {
+		t.Error("header.Heap not set after repair")
 	}
 	if db.header.Index == 0 {
 		t.Error("header.Index not set after repair")
 	}
-	if db.header.Data >= db.header.Index {
+	if db.header.Heap >= db.header.Index {
 		t.Error("data section should end before index section")
 	}
 }
@@ -62,14 +62,14 @@ func TestRepairUpdatesHeader(t *testing.T) {
 
 	db.Set("doc", "content")
 
-	if db.header.Data != 0 {
-		t.Error("header.Data should be 0 before repair")
+	if db.header.Heap != 0 {
+		t.Error("header.Heap should be 0 before repair")
 	}
 
 	db.Repair(nil)
 
-	if db.header.Data == 0 {
-		t.Error("header.Data should be set after repair")
+	if db.header.Heap == 0 {
+		t.Error("header.Heap should be set after repair")
 	}
 	if db.header.Index == 0 {
 		t.Error("header.Index should be set after repair")

@@ -1,10 +1,12 @@
 // Scan strategies for the two-region file layout.
 //
-// After compaction the file contains sorted sections where records are
-// ordered by ID. New writes are appended after the sorted sections into a
-// sparse (unsorted) region. Lookups therefore need two strategies:
+// After compaction the file contains a sorted heap (data + history
+// interleaved by ID then timestamp) followed by sorted indexes. New writes
+// are appended after the indexes into a sparse (unsorted) region. Lookups
+// therefore need two strategies:
 //
 //   - scan: binary search over a sorted section. O(log n) seeks.
+//     Pass recordType=0 to match any type (type-agnostic).
 //   - sparse: linear scan over the unsorted region. O(n) but bounded to
 //     records written since the last compaction.
 //
@@ -43,7 +45,7 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 		recordStart := newlinePos + 1
 		data, err := line(f, recordStart)
 		if err == nil && len(data) > 0 && valid(data) {
-			if len(data) >= MinRecordSize && data[7] == byte('0'+recordType) {
+			if len(data) >= MinRecordSize && (recordType == 0 || data[7] == byte('0'+recordType)) {
 				id := string(data[16:32])
 				pivot = &Result{recordStart, len(data), data, id}
 				pivotEnd = recordStart + int64(len(data)) + 1
@@ -97,7 +99,7 @@ func scanBack(f *os.File, pos, start int64, recordType int) *Result {
 			continue
 		}
 
-		if len(data) >= MinRecordSize && data[7] == byte('0'+recordType) {
+		if len(data) >= MinRecordSize && (recordType == 0 || data[7] == byte('0'+recordType)) {
 			id := string(data[16:32])
 			return &Result{recordStart, len(data), data, id}
 		}
@@ -115,7 +117,7 @@ func scanFwd(f *os.File, pos, end int64, recordType int) *Result {
 		}
 
 		if valid(data) {
-			if len(data) >= MinRecordSize && data[7] == byte('0'+recordType) {
+			if len(data) >= MinRecordSize && (recordType == 0 || data[7] == byte('0'+recordType)) {
 				id := string(data[16:32])
 				return &Result{pos, len(data), data, id}
 			}
@@ -124,6 +126,76 @@ func scanFwd(f *os.File, pos, end int64, recordType int) *Result {
 		pos += int64(len(data)) + 1 // +1 for newline
 	}
 	return nil
+}
+
+// group binary-searches a sorted region for any record with the given ID
+// (type-agnostic), then forward-scans to collect all contiguous records
+// sharing that ID. Returns them in file order (oldest first after
+// compaction). Used by History to collect all versions from the heap.
+func group(f *os.File, id string, start, end int64) []Result {
+	if start >= end {
+		return nil
+	}
+
+	hit := scan(f, id, start, end, 0)
+	if hit == nil {
+		return nil
+	}
+
+	// Walk backwards from the hit to find the first record in this ID group.
+	first := hit.Offset
+	for first > start {
+		// Find previous newline
+		prev := first - 1
+		var buf [1]byte
+		for prev > start {
+			if _, err := f.ReadAt(buf[:], prev-1); err != nil {
+				break
+			}
+			if buf[0] == '\n' {
+				break
+			}
+			prev--
+		}
+		recordStart := prev
+		if prev > start {
+			recordStart = prev // byte after newline
+		}
+
+		data, err := line(f, recordStart)
+		if err != nil || !valid(data) || len(data) < MinRecordSize {
+			break
+		}
+		rid := string(data[16:32])
+		if rid != id {
+			break
+		}
+		first = recordStart
+	}
+
+	// Forward-scan from first, collecting all records with this ID.
+	var results []Result
+	pos := first
+	for pos < end {
+		data, err := line(f, pos)
+		if err != nil || len(data) == 0 {
+			break
+		}
+		if !valid(data) || len(data) < MinRecordSize {
+			pos += int64(len(data)) + 1
+			continue
+		}
+		rid := string(data[16:32])
+		if rid != id {
+			break
+		}
+		dataCopy := make([]byte, len(data))
+		copy(dataCopy, data)
+		results = append(results, Result{pos, len(data), dataCopy, rid})
+		pos += int64(len(data)) + 1
+	}
+
+	return results
 }
 
 // sparse linearly scans an unsorted region. Every record is JSON-parsed

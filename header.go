@@ -1,8 +1,8 @@
 // The header occupies the first 128 bytes of the database file. It stores
-// byte offsets that divide the file into sections (records, history, indexes,
-// sparse) and a dirty flag for crash recovery. The fixed size allows the
-// dirty flag to be toggled with a single-byte write at a known offset,
-// avoiding a full header rewrite on every mutation.
+// byte offsets that divide the file into sections (heap, indexes, sparse)
+// and a dirty flag for crash recovery. The fixed size allows the dirty flag
+// to be toggled with a single-byte write at a known offset, avoiding a full
+// header rewrite on every mutation.
 package folio
 
 import (
@@ -18,20 +18,20 @@ const HeaderSize = 128
 // Header describes the file layout. The offset fields divide the file into
 // contiguous sections that are read independently:
 //
-//	[0..128)           Header (this struct, space-padded, newline-terminated)
-//	[128..History)     Sorted data records  (binary searchable after compaction)
-//	[History..Data)    Sorted history records
-//	[Data..Index)      Sorted index records  (point back to data records)
-//	[Index..EOF)       Sparse region  (unsorted appends since last compaction)
+//	[0..128)        Header (this struct, space-padded, newline-terminated)
+//	[128..Heap)     Heap: data + history sorted by ID then timestamp
+//	[Heap..Index)   Sorted index records (point to current data in the heap)
+//	[Index..EOF)    Sparse region (unsorted appends since last compaction)
 //
+// Within each ID group in the heap, records are sorted oldest-first.
+// History records (idx=3) precede the current data record (idx=2).
 // A zero offset means that section is empty or not yet established.
 type Header struct {
 	Version   int   `json:"_v"`   // Format version: 2 = current 128-byte header
 	Error     int   `json:"_e"`   // Dirty flag: 1 = unclean shutdown detected
 	Algorithm int   `json:"_alg"` // Hash algorithm used to derive _id from label
 	Timestamp int64 `json:"_ts"`  // Unix ms when this header was last written
-	History   int64 `json:"_h"`   // Byte offset where history section begins
-	Data      int64 `json:"_d"`   // Byte offset where index section begins
+	Heap      int64 `json:"_h"`   // Byte offset where index section begins (end of heap)
 	Index     int64 `json:"_i"`   // Byte offset where sparse region begins
 }
 
@@ -44,6 +44,15 @@ func header(f *os.File) (*Header, error) {
 
 	var hdr Header
 	if err := json.Unmarshal(bytes.TrimSpace(buf), &hdr); err != nil {
+		return nil, ErrCorruptHeader
+	}
+	if hdr.Heap != 0 && hdr.Heap < HeaderSize {
+		return nil, ErrCorruptHeader
+	}
+	if hdr.Index != 0 && hdr.Index < HeaderSize {
+		return nil, ErrCorruptHeader
+	}
+	if hdr.Heap != 0 && hdr.Index != 0 && hdr.Heap > hdr.Index {
 		return nil, ErrCorruptHeader
 	}
 	return &hdr, nil

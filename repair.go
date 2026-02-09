@@ -2,7 +2,8 @@
 //
 // Over time, appends accumulate in the sparse region and lookups degrade
 // toward linear scans. Repair reads every record, sorts by ID, and writes
-// a new file with contiguous sorted sections — restoring O(log n) binary
+// a new file with a contiguous heap (data + history sorted by ID then
+// timestamp) followed by sorted indexes — restoring O(log n) binary
 // search. It also serves as crash recovery: on Open, if a .tmp file or
 // dirty flag is found, Repair is run automatically to restore consistency.
 //
@@ -133,25 +134,17 @@ func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
 	}
 	entries := scanm(db.reader, HeaderSize, info.Size(), 0)
 
-	var records, history, indexes []Entry
-
-	for _, e := range entries {
-		switch e.Type {
-		case TypeRecord:
-			records = append(records, e)
-		case TypeHistory:
-			if !opts.PurgeHistory {
-				history = append(history, e)
-			}
-		case TypeIndex:
-			indexes = append(indexes, e)
-		}
+	// Split into heap (data+history) and indexes.
+	exclude := []int{}
+	if opts.PurgeHistory {
+		exclude = append(exclude, TypeHistory)
 	}
+	heap, indexes := unpack(entries, exclude...)
 
-	// Sorting by ID restores binary search; by TS within ID ensures the
-	// newest record for each ID is written last (and wins during lookup).
-	slices.SortFunc(records, byIDThenTS)
-	slices.SortFunc(history, byIDThenTS)
+	// Sort heap by ID then timestamp so all versions of a document are
+	// contiguous, oldest first. History records (idx=3) for an ID precede
+	// the current data record (idx=2) because they have earlier timestamps.
+	slices.SortFunc(heap, byIDThenTS)
 
 	// Keyed by label so each document keeps exactly one index in the output.
 	// As records are written below, each index's DstOff is updated to the
@@ -166,12 +159,9 @@ func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
 	}
 	ow := &offsetWriter{w: tmp, off: HeaderSize}
 
-	// Write sections in order: records, history, indexes.
-	// This matches the layout described in the Header type so that the
-	// offset fields in the final header accurately delimit each section.
-
-	for i := range records {
-		entry := &records[i]
+	// Write heap: interleaved data + history sorted by ID then timestamp.
+	for i := range heap {
+		entry := &heap[i]
 		record, err := line(db.reader, entry.SrcOff)
 		if err != nil {
 			if opts.BlockReaders {
@@ -188,34 +178,16 @@ func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
 			return 0, fmt.Errorf("repair: write newline: %w", err)
 		}
 
-		lbl := label(record)
-		if idx, ok := indexMap[lbl]; ok {
-			idx.DstOff = entry.DstOff
-		}
-	}
-
-	historyStart := ow.off
-
-	for i := range history {
-		entry := &history[i]
-		record, err := line(db.reader, entry.SrcOff)
-		if err != nil {
-			if opts.BlockReaders {
-				continue // crash recovery: salvage what we can
+		// Only update index offsets for current data records (not history).
+		if entry.Type == TypeRecord {
+			lbl := label(record)
+			if idx, ok := indexMap[lbl]; ok {
+				idx.DstOff = entry.DstOff
 			}
-			return 0, fmt.Errorf("repair: read history at %d: %w", entry.SrcOff, err)
-		}
-
-		entry.DstOff = ow.off
-		if _, err := ow.Write(record); err != nil {
-			return 0, fmt.Errorf("repair: write history: %w", err)
-		}
-		if _, err := ow.Write([]byte{'\n'}); err != nil {
-			return 0, fmt.Errorf("repair: write newline: %w", err)
 		}
 	}
 
-	dataEnd := ow.off
+	heapEnd := ow.off
 
 	// Indexes are rewritten with updated offsets pointing to the records'
 	// new positions in the output file.
@@ -246,8 +218,7 @@ func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
 		Version:   2,
 		Timestamp: now(),
 		Algorithm: db.header.Algorithm,
-		History:   historyStart,
-		Data:      dataEnd,
+		Heap:      heapEnd,
 		Index:     indexEnd,
 		Error:     0,
 	}
