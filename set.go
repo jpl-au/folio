@@ -18,6 +18,9 @@ import (
 // Set creates or updates a document. See the package comment for the
 // append-then-blank strategy.
 func (db *DB) Set(label, content string) error {
+	if label == "" {
+		return ErrInvalidLabel
+	}
 	if len(label) > MaxLabelSize {
 		return ErrLabelTooLong
 	}

@@ -47,10 +47,12 @@ func (db *DB) Repair(opts *CompactOptions) error {
 	}
 
 	defer func() {
-		db.cond.L.Lock()
-		db.state.Store(StateAll)
-		db.cond.Broadcast()
-		db.cond.L.Unlock()
+		if db.state.Load() != StateAll {
+			db.cond.L.Lock()
+			db.state.Store(StateAll)
+			db.cond.Broadcast()
+			db.cond.L.Unlock()
+		}
 	}()
 
 	tmp, err := db.root.Create(db.name + ".tmp")
@@ -69,6 +71,10 @@ func (db *DB) Repair(opts *CompactOptions) error {
 
 	indexEnd, err := db.rebuild(tmp, opts)
 	if err != nil {
+		db.cond.L.Lock()
+		db.state.Store(StateAll)
+		db.cond.Broadcast()
+		db.cond.L.Unlock()
 		if opts.BlockReaders {
 			db.mu.Unlock()
 		} else {

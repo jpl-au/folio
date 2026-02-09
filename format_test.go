@@ -207,6 +207,52 @@ func TestHistoryRecordFormat(t *testing.T) {
 	}
 }
 
+// TestScanmBytePositions marshals each record type and asserts the fixed
+// byte offsets that scanm relies on: type at 7, ID at 16..31, TS at 40..52.
+// If the JSON library changes field order, this test catches it.
+func TestScanmBytePositions(t *testing.T) {
+	id := "abcdef0123456789"
+	ts := int64(1706000000000)
+
+	records := []struct {
+		name string
+		data []byte
+	}{
+		{"Index", mustMarshal(t, Index{Type: TypeIndex, ID: id, Timestamp: ts, Offset: 128, Label: "x"})},
+		{"Record", mustMarshal(t, Record{Type: TypeRecord, ID: id, Timestamp: ts, Label: "x", Data: "d", History: "h"})},
+		{"History", mustMarshal(t, Record{Type: TypeHistory, ID: id, Timestamp: ts, Label: "x", Data: "", History: "h"})},
+	}
+
+	for _, tt := range records {
+		t.Run(tt.name, func(t *testing.T) {
+			b := tt.data
+			if len(b) < MinRecordSize {
+				t.Fatalf("marshalled %s too short: %d bytes", tt.name, len(b))
+			}
+			if b[7]-'0' != byte(b[7]-'0') || int(b[7]-'0') < 1 || int(b[7]-'0') > 3 {
+				t.Errorf("type byte at 7: got %q", b[7])
+			}
+			gotID := string(b[16:32])
+			if gotID != id {
+				t.Errorf("ID at [16:32] = %q, want %q\nraw: %s", gotID, id, b)
+			}
+			gotTS := string(b[40:53])
+			if gotTS != "1706000000000" {
+				t.Errorf("TS at [40:53] = %q, want %q\nraw: %s", gotTS, "1706000000000", b)
+			}
+		})
+	}
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
+}
+
 func TestSectionBoundaries(t *testing.T) {
 	db := openTestDB(t)
 

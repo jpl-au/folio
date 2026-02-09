@@ -17,9 +17,8 @@ package folio
 
 import (
 	"bytes"
-	json "github.com/goccy/go-json"
 	"encoding/hex"
-	"strings"
+	json "github.com/goccy/go-json"
 	"time"
 	"unicode/utf8"
 )
@@ -108,21 +107,21 @@ func valid(line []byte) bool {
 	return len(line) > 0 && line[0] == '{'
 }
 
-// label extracts the _l value by string scanning, avoiding a full JSON
-// parse. Used in hot paths (compaction, search) where only the label is
-// needed and the record may be megabytes of content.
+// label extracts the _l value by byte scanning, avoiding a full JSON
+// parse or string allocation. Used in hot paths (compaction, search)
+// where only the label is needed and the record may be megabytes.
 func label(line []byte) string {
-	s := string(line)
-	start := strings.Index(s, `"_l":"`)
+	marker := []byte(`"_l":"`)
+	start := bytes.Index(line, marker)
 	if start == -1 {
 		return ""
 	}
-	start += 6
-	end := strings.Index(s[start:], `"`)
+	start += len(marker)
+	end := bytes.IndexByte(line[start:], '"')
 	if end == -1 {
 		return ""
 	}
-	return s[start : start+end]
+	return string(line[start : start+end])
 }
 
 func now() int64 {

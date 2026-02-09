@@ -44,13 +44,8 @@ func TestEmptyLabel(t *testing.T) {
 	db := openTestDB(t)
 
 	err := db.Set("", "content")
-	if err != nil {
-		t.Errorf("Set with empty label: %v", err)
-	}
-
-	data, _ := db.Get("")
-	if data != "content" {
-		t.Errorf("Get = %q, want %q", data, "content")
+	if err != ErrInvalidLabel {
+		t.Errorf("Set empty label: got %v, want ErrInvalidLabel", err)
 	}
 }
 
