@@ -57,14 +57,16 @@ func (db *DB) Repair(opts *CompactOptions) error {
 		return fmt.Errorf("repair: create temp: %w", err)
 	}
 
-	// Phase 1: scan old file, write new file
+	// Phase 1: scan old file, write new file.
+	// The read lock (or write lock for crash recovery) is held for the
+	// duration of Phase 1 and released before Phase 2 upgrades to write.
 	if opts.BlockReaders {
 		db.mu.Lock()
 	} else {
 		db.mu.RLock()
 	}
 
-	info, err := db.reader.Stat()
+	indexEnd, err := db.rebuild(tmp, opts)
 	if err != nil {
 		if opts.BlockReaders {
 			db.mu.Unlock()
@@ -72,121 +74,8 @@ func (db *DB) Repair(opts *CompactOptions) error {
 			db.mu.RUnlock()
 		}
 		tmp.Close()
-		return fmt.Errorf("repair: stat: %w", err)
+		return err
 	}
-	entries := scanm(db.reader, HeaderSize, info.Size(), 0)
-
-	var records, history, indexes []Entry
-
-	for _, e := range entries {
-		switch e.Type {
-		case TypeRecord:
-			records = append(records, e)
-		case TypeHistory:
-			if !opts.PurgeHistory {
-				history = append(history, e)
-			}
-		case TypeIndex:
-			indexes = append(indexes, e)
-		}
-	}
-
-	// Sorting by ID restores binary search; by TS within ID ensures the
-	// newest record for each ID is written last (and wins during lookup).
-	slices.SortFunc(records, byIDThenTS)
-	slices.SortFunc(history, byIDThenTS)
-
-	// Keyed by label so each document keeps exactly one index in the output.
-	// As records are written below, each index's DstOff is updated to the
-	// record's new position in the output file.
-	indexMap := map[string]*Entry{}
-	for i := range indexes {
-		indexMap[indexes[i].Label] = &indexes[i]
-	}
-
-	tmp.Write(make([]byte, HeaderSize)) // placeholder, overwritten at the end
-	ow := &offsetWriter{w: tmp, off: HeaderSize}
-
-	// Write sections in order: records, history, indexes.
-	// This matches the layout described in the Header type so that the
-	// offset fields in the final header accurately delimit each section.
-
-	for i := range records {
-		entry := &records[i]
-		record, err := line(db.reader, entry.SrcOff)
-		if err != nil {
-			continue // skip unreadable records
-		}
-
-		entry.DstOff = ow.off
-		ow.Write(record)
-		ow.Write([]byte{'\n'})
-
-		lbl := label(record)
-		if idx, ok := indexMap[lbl]; ok {
-			idx.DstOff = entry.DstOff
-		}
-	}
-
-	historyStart := ow.off
-
-	for i := range history {
-		entry := &history[i]
-		record, err := line(db.reader, entry.SrcOff)
-		if err != nil {
-			continue // skip unreadable records
-		}
-
-		entry.DstOff = ow.off
-		ow.Write(record)
-		ow.Write([]byte{'\n'})
-	}
-
-	dataEnd := ow.off
-
-	// Indexes are rewritten with updated offsets pointing to the records'
-	// new positions in the output file.
-	sorted := slices.SortedFunc(maps.Values(indexMap), byID)
-	for _, idx := range sorted {
-		indexRecord, err := json.Marshal(Index{
-			Type:      TypeIndex,
-			ID:        idx.ID,
-			Offset:    idx.DstOff,
-			Label:     idx.Label,
-			Timestamp: now(),
-		})
-		if err != nil {
-			continue // skip unserializable indexes
-		}
-		ow.Write(indexRecord)
-		ow.Write([]byte{'\n'})
-	}
-
-	indexEnd := ow.off
-
-	// Now that all sections are written, we know their boundary offsets.
-	hdr := Header{
-		Version:   2,
-		Timestamp: now(),
-		Algorithm: db.header.Algorithm,
-		History:   historyStart,
-		Data:      dataEnd,
-		Index:     indexEnd,
-		Error:     0,
-	}
-	hdrBytes, err := hdr.encode()
-	if err != nil {
-		if opts.BlockReaders {
-			db.mu.Unlock()
-		} else {
-			db.mu.RUnlock()
-		}
-		tmp.Close()
-		return fmt.Errorf("repair: encode header: %w", err)
-	}
-	tmp.WriteAt(hdrBytes, 0)
-	tmp.Sync()
-	tmp.Close()
 
 	// Phase 2: swap file handles — brief exclusive lock
 	if !opts.BlockReaders {
@@ -232,6 +121,151 @@ func (db *DB) Repair(opts *CompactOptions) error {
 	}
 
 	return nil
+}
+
+// rebuild writes the sorted output to tmp. Called with db.mu held (read or
+// write depending on BlockReaders). On success it syncs and closes tmp, and
+// returns the byte offset of the sparse region start for db.tail.
+func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
+	info, err := db.reader.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("repair: stat: %w", err)
+	}
+	entries := scanm(db.reader, HeaderSize, info.Size(), 0)
+
+	var records, history, indexes []Entry
+
+	for _, e := range entries {
+		switch e.Type {
+		case TypeRecord:
+			records = append(records, e)
+		case TypeHistory:
+			if !opts.PurgeHistory {
+				history = append(history, e)
+			}
+		case TypeIndex:
+			indexes = append(indexes, e)
+		}
+	}
+
+	// Sorting by ID restores binary search; by TS within ID ensures the
+	// newest record for each ID is written last (and wins during lookup).
+	slices.SortFunc(records, byIDThenTS)
+	slices.SortFunc(history, byIDThenTS)
+
+	// Keyed by label so each document keeps exactly one index in the output.
+	// As records are written below, each index's DstOff is updated to the
+	// record's new position in the output file.
+	indexMap := map[string]*Entry{}
+	for i := range indexes {
+		indexMap[indexes[i].Label] = &indexes[i]
+	}
+
+	if _, err := tmp.Write(make([]byte, HeaderSize)); err != nil {
+		return 0, fmt.Errorf("repair: write header placeholder: %w", err)
+	}
+	ow := &offsetWriter{w: tmp, off: HeaderSize}
+
+	// Write sections in order: records, history, indexes.
+	// This matches the layout described in the Header type so that the
+	// offset fields in the final header accurately delimit each section.
+
+	for i := range records {
+		entry := &records[i]
+		record, err := line(db.reader, entry.SrcOff)
+		if err != nil {
+			if opts.BlockReaders {
+				continue // crash recovery: salvage what we can
+			}
+			return 0, fmt.Errorf("repair: read record at %d: %w", entry.SrcOff, err)
+		}
+
+		entry.DstOff = ow.off
+		if _, err := ow.Write(record); err != nil {
+			return 0, fmt.Errorf("repair: write record: %w", err)
+		}
+		if _, err := ow.Write([]byte{'\n'}); err != nil {
+			return 0, fmt.Errorf("repair: write newline: %w", err)
+		}
+
+		lbl := label(record)
+		if idx, ok := indexMap[lbl]; ok {
+			idx.DstOff = entry.DstOff
+		}
+	}
+
+	historyStart := ow.off
+
+	for i := range history {
+		entry := &history[i]
+		record, err := line(db.reader, entry.SrcOff)
+		if err != nil {
+			if opts.BlockReaders {
+				continue // crash recovery: salvage what we can
+			}
+			return 0, fmt.Errorf("repair: read history at %d: %w", entry.SrcOff, err)
+		}
+
+		entry.DstOff = ow.off
+		if _, err := ow.Write(record); err != nil {
+			return 0, fmt.Errorf("repair: write history: %w", err)
+		}
+		if _, err := ow.Write([]byte{'\n'}); err != nil {
+			return 0, fmt.Errorf("repair: write newline: %w", err)
+		}
+	}
+
+	dataEnd := ow.off
+
+	// Indexes are rewritten with updated offsets pointing to the records'
+	// new positions in the output file.
+	sorted := slices.SortedFunc(maps.Values(indexMap), byID)
+	for _, idx := range sorted {
+		indexRecord, err := json.Marshal(Index{
+			Type:      TypeIndex,
+			ID:        idx.ID,
+			Offset:    idx.DstOff,
+			Label:     idx.Label,
+			Timestamp: now(),
+		})
+		if err != nil {
+			return 0, fmt.Errorf("repair: marshal index: %w", err)
+		}
+		if _, err := ow.Write(indexRecord); err != nil {
+			return 0, fmt.Errorf("repair: write index: %w", err)
+		}
+		if _, err := ow.Write([]byte{'\n'}); err != nil {
+			return 0, fmt.Errorf("repair: write newline: %w", err)
+		}
+	}
+
+	indexEnd := ow.off
+
+	// Now that all sections are written, we know their boundary offsets.
+	hdr := Header{
+		Version:   2,
+		Timestamp: now(),
+		Algorithm: db.header.Algorithm,
+		History:   historyStart,
+		Data:      dataEnd,
+		Index:     indexEnd,
+		Error:     0,
+	}
+	hdrBytes, err := hdr.encode()
+	if err != nil {
+		return 0, fmt.Errorf("repair: encode header: %w", err)
+	}
+	if _, err := tmp.WriteAt(hdrBytes, 0); err != nil {
+		return 0, fmt.Errorf("repair: write header: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return 0, fmt.Errorf("repair: sync: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return 0, fmt.Errorf("repair: close temp: %w", err)
+	}
+
+	return indexEnd, nil
 }
 
 // offsetWriter adapts WriterAt to sequential writes. Repair needs WriterAt

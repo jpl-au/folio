@@ -98,7 +98,9 @@ func (db *DB) Set(label, content string) error {
 
 	// Retire the previous version: retype to history, blank _d, erase index
 	if old != nil {
-		db.writeAt(oldIdx.Offset+7, []byte("3")) // idx 2→3
+		if err := db.writeAt(oldIdx.Offset+7, []byte("3")); err != nil {
+			return fmt.Errorf("set: retype record: %w", err)
+		}
 
 		record, err := line(db.reader, oldIdx.Offset)
 		if err != nil {
@@ -107,10 +109,14 @@ func (db *DB) Set(label, content string) error {
 		dStart := strings.Index(string(record), `"_d":"`) + 6
 		dEnd := strings.Index(string(record), `","_h":"`)
 		if dStart > 5 && dEnd > dStart {
-			db.writeAt(oldIdx.Offset+int64(dStart), bytes.Repeat([]byte(" "), dEnd-dStart))
+			if err := db.writeAt(oldIdx.Offset+int64(dStart), bytes.Repeat([]byte(" "), dEnd-dStart)); err != nil {
+				return fmt.Errorf("set: blank content: %w", err)
+			}
 		}
 
-		db.writeAt(old.Offset, bytes.Repeat([]byte(" "), old.Length)) // erase old index
+		if err := db.writeAt(old.Offset, bytes.Repeat([]byte(" "), old.Length)); err != nil {
+			return fmt.Errorf("set: erase index: %w", err)
+		}
 	}
 
 	return nil

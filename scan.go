@@ -74,11 +74,13 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 // scanBack walks backwards byte-by-byte to find a valid pivot when the
 // forward alignment in scan lands outside the search range.
 func scanBack(f *os.File, pos, start int64, recordType int) *Result {
+	var buf [1]byte
 	for pos > start {
 		pos--
 		for pos > start {
-			buf := make([]byte, 1)
-			f.ReadAt(buf, pos)
+			if _, err := f.ReadAt(buf[:], pos); err != nil {
+				return nil
+			}
 			if buf[0] == '\n' {
 				break
 			}

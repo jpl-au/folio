@@ -108,7 +108,11 @@ func Open(dir, name string, config Config) (*DB, error) {
 			root.Close()
 			return nil, fmt.Errorf("write header: %w", err)
 		}
-		file.Sync()
+		if err := file.Sync(); err != nil {
+			file.Close()
+			root.Close()
+			return nil, fmt.Errorf("sync header: %w", err)
+		}
 		file.Close()
 	}
 
@@ -198,13 +202,17 @@ func (db *DB) Close() error {
 		db.lock.setFile(nil)
 	}
 
+	var errs []error
+
 	if db.header.Error == 1 {
 		db.header.Error = 0
-		dirty(db.writer, false)
-		db.writer.Sync()
+		if err := dirty(db.writer, false); err != nil {
+			errs = append(errs, err)
+		}
+		if err := db.writer.Sync(); err != nil {
+			errs = append(errs, err)
+		}
 	}
-
-	var errs []error
 	if err := db.reader.Close(); err != nil {
 		errs = append(errs, err)
 	}

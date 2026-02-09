@@ -56,7 +56,9 @@ func (db *DB) Rehash(newAlg int) error {
 	if _, err := db.writer.WriteAt(hdrBytes, 0); err != nil {
 		return fmt.Errorf("rehash: write header: %w", err)
 	}
-	db.writer.Sync()
+	if err := db.writer.Sync(); err != nil {
+		return fmt.Errorf("rehash: sync: %w", err)
+	}
 
 	return nil
 }

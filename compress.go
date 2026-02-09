@@ -31,8 +31,9 @@ func compress(data []byte) string {
 
 	var encoded bytes.Buffer
 	enc := ascii85.NewEncoder(&encoded)
-	enc.Write(compressed)
-	enc.Close()
+	// bytes.Buffer.Write never errors; enc.Close flushes trailing padding.
+	_, _ = enc.Write(compressed)
+	_ = enc.Close()
 
 	return encoded.String()
 }

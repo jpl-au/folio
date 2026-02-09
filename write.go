@@ -26,7 +26,9 @@ func (db *DB) raw(line []byte) (int64, error) {
 	db.tail += int64(len(data))
 
 	if db.config.SyncWrites {
-		db.writer.Sync()
+		if err := db.writer.Sync(); err != nil {
+			return 0, err
+		}
 	}
 	return offset, nil
 }
@@ -70,7 +72,9 @@ func (db *DB) writeAt(offset int64, data []byte) error {
 		return err
 	}
 	if db.config.SyncWrites {
-		db.writer.Sync()
+		if err := db.writer.Sync(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

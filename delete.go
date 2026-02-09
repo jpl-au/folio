@@ -63,7 +63,9 @@ func (db *DB) Delete(label string) error {
 // and erases the index line so the document is no longer discoverable.
 // The _h field is left intact for version retrieval.
 func blank(db *DB, dataOff int64, idx *Result) error {
-	db.writeAt(dataOff+7, []byte("3"))
+	if err := db.writeAt(dataOff+7, []byte("3")); err != nil {
+		return fmt.Errorf("retype record: %w", err)
+	}
 
 	record, err := line(db.reader, dataOff)
 	if err != nil {
@@ -72,9 +74,13 @@ func blank(db *DB, dataOff int64, idx *Result) error {
 	dStart := strings.Index(string(record), `"_d":"`) + 6
 	dEnd := strings.Index(string(record), `","_h":"`)
 	if dStart > 5 && dEnd > dStart {
-		db.writeAt(dataOff+int64(dStart), bytes.Repeat([]byte(" "), dEnd-dStart))
+		if err := db.writeAt(dataOff+int64(dStart), bytes.Repeat([]byte(" "), dEnd-dStart)); err != nil {
+			return fmt.Errorf("blank content: %w", err)
+		}
 	}
 
-	db.writeAt(idx.Offset, bytes.Repeat([]byte(" "), idx.Length))
+	if err := db.writeAt(idx.Offset, bytes.Repeat([]byte(" "), idx.Length)); err != nil {
+		return fmt.Errorf("erase index: %w", err)
+	}
 	return nil
 }
