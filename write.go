@@ -1,14 +1,17 @@
-// Write operations for appending and modifying records.
+// Write primitives for the append-only file.
 //
-// All write operations use the writer handle and track the tail offset.
-// The dirty flag is set on first write and cleared on clean shutdown.
+// New records are always appended at db.tail (the current end of file).
+// The dirty flag is set on the first write of a session so that an unclean
+// shutdown can be detected on next Open and trigger automatic repair.
+// It is cleared during Close once all data has been flushed.
 package folio
 
 import (
 	json "github.com/goccy/go-json"
 )
 
-// raw writes raw bytes to end of file. Sets dirty flag on first write.
+// raw appends bytes at db.tail and advances the tail. The dirty flag is
+// set on the first write so that a crash before Close triggers repair.
 func (db *DB) raw(line []byte) (int64, error) {
 	if db.header.Error == 0 {
 		db.header.Error = 1
@@ -28,39 +31,30 @@ func (db *DB) raw(line []byte) (int64, error) {
 	return offset, nil
 }
 
-// append marshals and writes a Data Record and Index Record atomically.
-// Both records are concatenated and written in a single syscall to ensure cohesion.
+// append writes a data Record and its Index as a single batch. Both are
+// concatenated into one buffer so a single WriteAt call places them
+// adjacently — if the process crashes mid-write, repair will discard
+// any incomplete trailing line.
 func (db *DB) append(record *Record, idx *Index) (int64, error) {
-	// Serialize Data Record
 	rData, err := json.Marshal(record)
 	if err != nil {
 		return 0, err
 	}
 
-	// Calculate Data offset (current tail)
 	dataOffset := db.tail
+	idx.Offset = dataOffset // index points back to the record we are about to write
 
-	// Update Index with correct offset
-	idx.Offset = dataOffset
-
-	// Serialize Index Record
 	iData, err := json.Marshal(idx)
 	if err != nil {
 		return 0, err
 	}
 
-	// Concatenate: Record + \n + Index + \n
-	// Pre-allocate complete buffer to avoid reallocations
-	totalLen := len(rData) + 1 + len(iData) + 1
-	combined := make([]byte, 0, totalLen)
-
+	combined := make([]byte, 0, len(rData)+1+len(iData)+1)
 	combined = append(combined, rData...)
 	combined = append(combined, '\n')
 	combined = append(combined, iData...)
-	// newline added by raw()
+	// raw() appends the final newline
 
-	// Write atomic batch
-	// Note: raw() adds the final newline to the batch
 	if _, err := db.raw(combined); err != nil {
 		return 0, err
 	}
@@ -68,7 +62,9 @@ func (db *DB) append(record *Record, idx *Index) (int64, error) {
 	return dataOffset, nil
 }
 
-// writeAt overwrites at a specific position. Does not affect tail.
+// writeAt patches bytes at an existing offset without moving the tail.
+// Used for in-place modifications: toggling the type byte (2→3), blanking
+// content, and overwriting invalidated index records with spaces.
 func (db *DB) writeAt(offset int64, data []byte) error {
 	if _, err := db.writer.WriteAt(data, offset); err != nil {
 		return err

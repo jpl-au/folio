@@ -1,51 +1,71 @@
-// Core database type and lifecycle operations.
+// Database lifecycle: open, close, crash recovery.
 //
-// DB provides the main interface for document storage. It manages file handles,
-// tracks state for concurrency control, and coordinates all read/write operations.
+// Concurrency is managed in three layers, each serving a different scope:
+//
+//  1. Atomic state machine (db.state): gates whether new operations are
+//     allowed at all. Transitions: StateAll → StateRead → StateNone →
+//     StateClosed. Checked at the top of every public method.
+//
+//  2. sync.RWMutex (db.mu): coordinates in-process readers and writers.
+//     Readers hold RLock; writers and Repair hold Lock.
+//
+//  3. OS file lock (db.lock): coordinates across processes via flock(2)
+//     or LockFileEx. See lock.go for lifetime management.
+//
+// When an operation starts, it waits (via db.cond) until the state allows
+// it, then acquires the appropriate lock level at layers 2 and 3.
 package folio
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
 )
 
-// State constants for concurrency control.
+// State machine values. Transitions are monotonic during shutdown
+// (All→Closed) but cycle during maintenance (All→Read→All for Compact,
+// All→None→All for Rehash). blockRead/blockWrite wait on db.cond until
+// the state allows their operation.
 const (
-	StateAll    = 0 // Readers and writers allowed
-	StateRead   = 1 // Only readers allowed (during compaction)
-	StateNone   = 2 // Nothing allowed (during rehash)
-	StateClosed = 3 // Database closed
+	StateAll    = 0 // reads and writes permitted
+	StateRead   = 1 // reads only (Compact in progress, Phase 1)
+	StateNone   = 2 // nothing permitted (Rehash / crash recovery)
+	StateClosed = 3 // terminal
 )
 
-// Config holds database configuration options.
+// Config tunes the memory/disk trade-off. Zero values use safe defaults.
 type Config struct {
-	HashAlgorithm int  // 1=xxHash3, 2=FNV1a, 3=Blake2b
-	ReadBuffer    int  // Buffer size for reading (default 64KB)
-	MaxRecordSize int  // Maximum single record size (default 16MB)
-	SyncWrites    bool // Call fsync after writes
-	BloomFilter   bool // Build bloom filter on Open for sparse region
+	HashAlgorithm int  // 1=xxHash3 (default), 2=FNV1a, 3=Blake2b
+	ReadBuffer    int  // scanner buffer (default 64KB)
+	MaxRecordSize int  // largest allowed record (default 16MB)
+	SyncWrites    bool // fsync after every write (durability vs throughput)
+	BloomFilter   bool // maintain bloom filter over the sparse region
 }
 
-// DB represents an open database.
+// DB is an open database handle. Two separate file descriptors are held:
+// reader (O_RDONLY) for concurrent reads and writer (O_RDWR) for appends
+// and in-place patches. The OS file lock is taken on the writer fd.
 type DB struct {
-	root   *os.Root  // Sandboxed filesystem access
-	name   string    // Database filename
-	reader *os.File  // Read handle (O_RDONLY)
-	writer *os.File  // Write handle (O_RDWR)
-	lock   *fileLock // OS-level file lock
-	header *Header   // Cached header
-	config Config    // Configuration
-	bloom  *bloom    // nil when BloomFilter is false
-	tail   int64     // Append offset (end of file)
+	root   *os.Root
+	name   string
+	reader *os.File  // read-only fd, shared by concurrent readers
+	writer *os.File  // read-write fd, used for appends and patches
+	lock   *fileLock // OS-level flock on the writer fd (see lock.go)
+	header *Header   // cached, rewritten on Repair/Rehash
+	config Config
+	bloom  *bloom // nil unless Config.BloomFilter is set
+	tail   int64  // next append position (current end of file)
 	state  atomic.Int32
-	cond   *sync.Cond
-	mu     sync.RWMutex
+	cond   *sync.Cond   // waiters blocked by state transitions
+	mu     sync.RWMutex // in-process read/write coordination
 }
 
-// Open opens or creates a database file.
+// Open opens or creates a database. If a previous session crashed (dirty
+// flag set, or .tmp file left behind), an automatic Repair is attempted
+// under an exclusive lock to restore consistency before returning.
 func Open(dir, name string, config Config) (*DB, error) {
-	// Default config values
 	if config.HashAlgorithm == 0 {
 		config.HashAlgorithm = AlgXXHash3
 	}
@@ -61,10 +81,8 @@ func Open(dir, name string, config Config) (*DB, error) {
 		return nil, err
 	}
 
-	// Check if file exists
 	_, err = root.Stat(name)
 	if os.IsNotExist(err) {
-		// Create new database
 		file, err := root.Create(name)
 		if err != nil {
 			root.Close()
@@ -79,20 +97,27 @@ func Open(dir, name string, config Config) (*DB, error) {
 			Index:     0,
 			Error:     0,
 		}
-		buf, _ := hdr.encode()
-		file.Write(buf)
+		buf, err := hdr.encode()
+		if err != nil {
+			file.Close()
+			root.Close()
+			return nil, fmt.Errorf("encode header: %w", err)
+		}
+		if _, err := file.Write(buf); err != nil {
+			file.Close()
+			root.Close()
+			return nil, fmt.Errorf("write header: %w", err)
+		}
 		file.Sync()
 		file.Close()
 	}
 
-	// Open reader handle
 	reader, err := root.OpenFile(name, os.O_RDONLY, 0644)
 	if err != nil {
 		root.Close()
 		return nil, err
 	}
 
-	// Open writer handle
 	writer, err := root.OpenFile(name, os.O_RDWR, 0644)
 	if err != nil {
 		reader.Close()
@@ -100,10 +125,15 @@ func Open(dir, name string, config Config) (*DB, error) {
 		return nil, err
 	}
 
-	// Open lock handle (using the writer file descriptor)
 	flock := &fileLock{f: writer}
 
-	info, _ := writer.Stat()
+	info, err := writer.Stat()
+	if err != nil {
+		reader.Close()
+		writer.Close()
+		root.Close()
+		return nil, fmt.Errorf("stat: %w", err)
+	}
 	hdr, err := header(reader)
 	if err != nil {
 		reader.Close()
@@ -124,7 +154,6 @@ func Open(dir, name string, config Config) (*DB, error) {
 		cond:   sync.NewCond(&sync.Mutex{}),
 	}
 
-	// Build bloom filter from sparse IDs
 	if config.BloomFilter {
 		db.bloom = newBloom()
 		entries := scanm(reader, db.sparseStart(), info.Size(), TypeIndex)
@@ -133,7 +162,8 @@ func Open(dir, name string, config Config) (*DB, error) {
 		}
 	}
 
-	// Crash detection
+	// A leftover .tmp file or a dirty header means the previous session
+	// crashed mid-write. Repair rebuilds the file from its surviving records.
 	_, tmpErr := root.Stat(name + ".tmp")
 	tmpExists := tmpErr == nil
 	needsRepair := tmpExists || db.header.Error == 1
@@ -152,7 +182,8 @@ func Open(dir, name string, config Config) (*DB, error) {
 	return db, nil
 }
 
-// Close closes the database and releases resources.
+// Close flushes state, clears the dirty flag if set, and releases all
+// file handles. Any blocked operations wake up and receive ErrClosed.
 func (db *DB) Close() error {
 	db.cond.L.Lock()
 	db.state.Store(StateClosed)
@@ -162,12 +193,11 @@ func (db *DB) Close() error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	// Ensure lock is released
+	// Drain in-flight flock calls before closing the fd (see lock.go)
 	if db.lock != nil {
-		db.lock.Unlock()
+		db.lock.setFile(nil)
 	}
 
-	// Mark clean shutdown
 	if db.header.Error == 1 {
 		db.header.Error = 0
 		dirty(db.writer, false)
@@ -185,21 +215,19 @@ func (db *DB) Close() error {
 		errs = append(errs, err)
 	}
 
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
-// Section boundary methods
+// Section boundary helpers. These translate header offsets into the ranges
+// passed to scan (binary search) and sparse (linear scan). A zero header
+// offset means the section is empty — we fall back to HeaderSize so scans
+// start at the first possible record position.
+//
+// File layout after compaction:
+//   [Header][Records][History][Indexes][Sparse→EOF]
 
-func (db *DB) indexStart() int64 {
-	return db.header.Data
-}
-
-func (db *DB) indexEnd() int64 {
-	return db.header.Index
-}
+func (db *DB) indexStart() int64 { return db.header.Data }
+func (db *DB) indexEnd() int64   { return db.header.Index }
 
 func (db *DB) historyStart() int64 {
 	if db.header.History == 0 {
@@ -215,15 +243,16 @@ func (db *DB) sparseStart() int64 {
 	return db.header.Index
 }
 
-// Blocking methods for concurrency control
+// blockWrite and blockRead acquire all three concurrency layers (state
+// check → OS flock → RWMutex) before allowing an operation to proceed.
+// On return the caller holds db.mu (Lock or RLock) and db.lock; both
+// must be released in the defer of the calling method.
 
 func (db *DB) blockWrite() error {
-	// Check closed state before acquiring OS lock
 	if db.state.Load() == StateClosed {
 		return ErrClosed
 	}
 
-	// Acquire OS lock
 	if err := db.lock.Lock(LockExclusive); err != nil {
 		return err
 	}
@@ -243,12 +272,10 @@ func (db *DB) blockWrite() error {
 }
 
 func (db *DB) blockRead() error {
-	// Check closed state before acquiring OS lock
 	if db.state.Load() == StateClosed {
 		return ErrClosed
 	}
 
-	// Acquire OS lock
 	if err := db.lock.Lock(LockShared); err != nil {
 		return err
 	}

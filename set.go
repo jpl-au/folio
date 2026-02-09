@@ -1,12 +1,22 @@
-// Document creation and update.
+// Document creation and update using append-then-blank.
+//
+// A Set always appends a new Record+Index pair at the tail. If an older
+// version exists, it is then patched in place: its type byte is changed
+// from Record (2) to History (3), its _d content is blanked with spaces,
+// and its index line is overwritten with spaces. The compressed snapshot
+// in _h is preserved so History can still retrieve the old content.
+// This approach avoids rewriting the file on every update while keeping
+// the latest version immediately accessible via the newest index.
 package folio
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 )
 
-// Set creates or updates a document.
+// Set creates or updates a document. See the package comment for the
+// append-then-blank strategy.
 func (db *DB) Set(label, content string) error {
 	if len(label) > MaxLabelSize {
 		return ErrLabelTooLong
@@ -28,13 +38,15 @@ func (db *DB) Set(label, content string) error {
 
 	id := hash(label, db.header.Algorithm)
 
-	// Find old entry if exists
 	var old *Result
 	var oldIdx *Index
 
 	result := scan(db.reader, id, db.indexStart(), db.indexEnd(), TypeIndex)
 	if result != nil {
-		idx, _ := decodeIndex(result.Data)
+		idx, err := decodeIndex(result.Data)
+		if err != nil {
+			return fmt.Errorf("set: %w", err)
+		}
 		if idx.Label == label {
 			old = result
 			oldIdx = idx
@@ -42,9 +54,16 @@ func (db *DB) Set(label, content string) error {
 	}
 
 	if old == nil {
-		results := sparse(db.reader, id, db.sparseStart(), size(db.reader), TypeIndex)
+		sz, err := size(db.reader)
+		if err != nil {
+			return fmt.Errorf("set: stat: %w", err)
+		}
+		results := sparse(db.reader, id, db.sparseStart(), sz, TypeIndex)
 		for i := len(results) - 1; i >= 0; i-- {
-			idx, _ := decodeIndex(results[i].Data)
+			idx, err := decodeIndex(results[i].Data)
+			if err != nil {
+				return fmt.Errorf("set: %w", err)
+			}
 			if idx.Label == label {
 				old = &results[i]
 				oldIdx = idx
@@ -53,7 +72,6 @@ func (db *DB) Set(label, content string) error {
 		}
 	}
 
-	// Prepare records
 	newRecord := &Record{
 		Type:      TypeRecord,
 		ID:        id,
@@ -70,32 +88,29 @@ func (db *DB) Set(label, content string) error {
 		Timestamp: now(),
 	}
 
-	// Atomic append
-	dataOff, err := db.append(newRecord, newIndex)
-	if err != nil {
-		return err
+	if _, err := db.append(newRecord, newIndex); err != nil {
+		return fmt.Errorf("set: %w", err)
 	}
-	_ = dataOff
 
 	if db.bloom != nil {
 		db.bloom.Add(id)
 	}
 
-	// Blank old records
+	// Retire the previous version: retype to history, blank _d, erase index
 	if old != nil {
-		// Convert old data to history: idx 2 → 3
-		db.writeAt(oldIdx.Offset+7, []byte("3"))
+		db.writeAt(oldIdx.Offset+7, []byte("3")) // idx 2→3
 
-		// Blank _d content
-		record, _ := line(db.reader, oldIdx.Offset)
+		record, err := line(db.reader, oldIdx.Offset)
+		if err != nil {
+			return fmt.Errorf("set: read old record: %w", err)
+		}
 		dStart := strings.Index(string(record), `"_d":"`) + 6
 		dEnd := strings.Index(string(record), `","_h":"`)
 		if dStart > 5 && dEnd > dStart {
 			db.writeAt(oldIdx.Offset+int64(dStart), bytes.Repeat([]byte(" "), dEnd-dStart))
 		}
 
-		// Invalidate old index
-		db.writeAt(old.Offset, bytes.Repeat([]byte(" "), old.Length))
+		db.writeAt(old.Offset, bytes.Repeat([]byte(" "), old.Length)) // erase old index
 	}
 
 	return nil

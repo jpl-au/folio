@@ -1,8 +1,18 @@
-// Record types for data storage.
+// Record format and type definitions.
 //
-// Three record types exist: Index (lookup), Record (current data), and History
-// (previous versions). All are single-line JSON with the idx field first for
-// efficient type detection.
+// Every line in the database file is a JSON object beginning with {"idx":N
+// where N identifies the record type. This fixed prefix allows type detection
+// and ID extraction at known byte offsets without JSON parsing — critical for
+// binary search and compaction where millions of records may be scanned.
+//
+// Three types coexist in the file:
+//   - Index (idx=1): maps a label's hash to the byte offset of its data record.
+//   - Record (idx=2): the current content of a document.
+//   - History (idx=3): a previous version with compressed content in _h.
+//
+// On update, the old Record is retyped to History (byte patch from 2→3) and
+// its _d field is blanked. This preserves the compressed snapshot in _h for
+// version retrieval while making the record invisible to data scans.
 package folio
 
 import (
@@ -14,62 +24,67 @@ import (
 	"unicode/utf8"
 )
 
-// Record type markers.
+// Record type markers. These appear as the first value in every JSON line
+// ({"idx":N) and are used for byte-level type checks during scan.
 const (
-	TypeIndex   = 1 // Index record
-	TypeRecord  = 2 // Current data record
-	TypeHistory = 3 // Historical data record
+	TypeIndex   = 1
+	TypeRecord  = 2
+	TypeHistory = 3
 )
 
-// MaxLabelSize is the maximum length of a document label in bytes.
-const MaxLabelSize = 256
+const MaxLabelSize = 256              // bytes
+const MaxRecordSize = 16 * 1024 * 1024 // 16MB, bounds scanner buffer allocation
 
-// MaxRecordSize is the maximum length of a single record in bytes (16MB).
-const MaxRecordSize = 16 * 1024 * 1024
-
-// Record represents a data record (current or historical).
+// Record is a data or history line. When a document is updated, the old
+// Record has its Type patched from 2→3 (becoming history) and _d blanked,
+// so the compressed _h snapshot is the only way to recover prior content.
 type Record struct {
-	Type      int    `json:"idx"` // TypeRecord or TypeHistory
-	ID        string `json:"_id"` // 16 hex chars
-	Timestamp int64  `json:"_ts"` // Unix milliseconds
-	Label     string `json:"_l"`  // User-provided name
-	Data      string `json:"_d"`  // Document content (text/markdown)
-	History   string `json:"_h"`  // Compressed snapshot
+	Type      int    `json:"idx"`
+	ID        string `json:"_id"` // 16 hex chars, hash of Label
+	Timestamp int64  `json:"_ts"` // unix ms
+	Label     string `json:"_l"`
+	Data      string `json:"_d"` // current content (blank for history)
+	History   string `json:"_h"` // zstd+ascii85 compressed snapshot
 }
 
-// Index represents an index record pointing to a data record.
+// Index maps a label's hashed ID to the byte offset of its data Record.
+// During lookup, the index is found first (by binary or sparse scan on ID),
+// then the data record is read at the offset the index points to.
 type Index struct {
-	Type      int    `json:"idx"` // TypeIndex
-	ID        string `json:"_id"` // 16 hex chars
-	Timestamp int64  `json:"_ts"` // Unix milliseconds
-	Offset    int64  `json:"_o"`  // Byte position of data record
-	Label     string `json:"_l"`  // User-provided name
+	Type      int    `json:"idx"`
+	ID        string `json:"_id"`
+	Timestamp int64  `json:"_ts"`
+	Offset    int64  `json:"_o"` // byte position of the corresponding Record
+	Label     string `json:"_l"`
 }
 
-// Result contains position and content from scan operations.
+// Result carries a record's position and raw bytes from a scan. Callers
+// use Offset to read or overwrite the record and Data for parsing.
 type Result struct {
-	Offset int64  // Byte position in file
-	Length int    // Record length (bytes)
-	Data   []byte // Raw record content
-	ID     string // Record ID (16 hex chars)
+	Offset int64
+	Length int
+	Data   []byte
+	ID     string
 }
 
-// Entry contains metadata extracted during minimal scan for compaction.
+// Entry holds lightweight metadata extracted by scanm. Full JSON parsing
+// is skipped — fields are read at fixed byte positions. DstOff is zero
+// until compaction fills it with the record's new position in the output.
 type Entry struct {
-	ID     string // 16 hex chars
-	TS     int64  // Timestamp
-	Type   int    // idx value
-	SrcOff int64  // Source byte position
-	DstOff int64  // Destination position (filled during write)
-	Length int    // Record length
-	Label  string // For index entries only
+	ID     string
+	TS     int64
+	Type   int
+	SrcOff int64  // position in the source file
+	DstOff int64  // position in the compaction output (set during write)
+	Length int
+	Label  string // populated only for index entries
 }
 
-// MinRecordSize is the minimum valid record length.
-// Format: {"idx":N,"_id":"XXXXXXXXXXXXXXXX","_ts":NNNNNNNNNNNNN
+// MinRecordSize is the shortest valid JSON line. Anything shorter cannot
+// contain the required idx, _id, and _ts fields and is skipped during scan.
 const MinRecordSize = 53
 
-// decode parses raw bytes into a Record. Works for all record types.
+// decode performs full JSON parsing of a record line.
 func decode(data []byte) (*Record, error) {
 	var r Record
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -78,7 +93,7 @@ func decode(data []byte) (*Record, error) {
 	return &r, nil
 }
 
-// decodeIndex parses raw bytes into an Index record.
+// decodeIndex performs full JSON parsing of an index line.
 func decodeIndex(data []byte) (*Index, error) {
 	var idx Index
 	if err := json.Unmarshal(data, &idx); err != nil {
@@ -87,12 +102,15 @@ func decodeIndex(data []byte) (*Index, error) {
 	return &idx, nil
 }
 
-// valid checks if a line represents a valid record (starts with '{').
+// valid is a fast pre-check: blanked records and the header start with
+// spaces, so only lines starting with '{' can be JSON records.
 func valid(line []byte) bool {
 	return len(line) > 0 && line[0] == '{'
 }
 
-// label extracts the _l value from a record line without full parsing.
+// label extracts the _l value by string scanning, avoiding a full JSON
+// parse. Used in hot paths (compaction, search) where only the label is
+// needed and the record may be megabytes of content.
 func label(line []byte) string {
 	s := string(line)
 	start := strings.Index(s, `"_l":"`)
@@ -107,14 +125,13 @@ func label(line []byte) string {
 	return s[start : start+end]
 }
 
-// now returns the current time in unix milliseconds.
 func now() int64 {
 	return time.Now().UnixMilli()
 }
 
-// unescape decodes JSON string escape sequences in-place.
-// Handles: \" \\ \/ \n \r \t \b \f \uXXXX.
-// Returns input unchanged if no backslash is present.
+// unescape resolves JSON string escapes so that regex search operates on
+// the actual content rather than the escaped representation. Returns the
+// input unchanged if no backslash is present (common case, zero allocation).
 func unescape(b []byte) []byte {
 	if bytes.IndexByte(b, '\\') < 0 {
 		return b

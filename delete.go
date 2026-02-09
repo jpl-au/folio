@@ -1,12 +1,16 @@
-// Document deletion.
+// Soft deletion — the record is converted to history so its compressed
+// snapshot survives for version retrieval, but it no longer appears in
+// lookups or listings because its index is erased.
 package folio
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 )
 
-// Delete removes a document (soft delete, preserves history).
+// Delete soft-removes a document. The record's compressed history snapshot
+// is preserved; only Purge permanently removes it.
 func (db *DB) Delete(label string) error {
 	if err := db.blockWrite(); err != nil {
 		return err
@@ -18,50 +22,59 @@ func (db *DB) Delete(label string) error {
 
 	id := hash(label, db.header.Algorithm)
 
-	// Binary search sorted index
 	result := scan(db.reader, id, db.indexStart(), db.indexEnd(), TypeIndex)
 	if result != nil {
-		idx, _ := decodeIndex(result.Data)
+		idx, err := decodeIndex(result.Data)
+		if err != nil {
+			return fmt.Errorf("delete: %w", err)
+		}
 		if idx.Label == label {
-			// Convert to history
-			db.writeAt(idx.Offset+7, []byte("3"))
-
-			// Blank _d content
-			record, _ := line(db.reader, idx.Offset)
-			dStart := strings.Index(string(record), `"_d":"`) + 6
-			dEnd := strings.Index(string(record), `","_h":"`)
-			if dStart > 5 && dEnd > dStart {
-				db.writeAt(idx.Offset+int64(dStart), bytes.Repeat([]byte(" "), dEnd-dStart))
+			if err := blank(db, idx.Offset, result); err != nil {
+				return fmt.Errorf("delete: %w", err)
 			}
-
-			// Blank index
-			db.writeAt(result.Offset, bytes.Repeat([]byte(" "), result.Length))
 			return nil
 		}
 	}
 
-	// Linear scan sparse
-	results := sparse(db.reader, id, db.sparseStart(), size(db.reader), TypeIndex)
+	sz, err := size(db.reader)
+	if err != nil {
+		return fmt.Errorf("delete: stat: %w", err)
+	}
+	results := sparse(db.reader, id, db.sparseStart(), sz, TypeIndex)
 	for i := len(results) - 1; i >= 0; i-- {
 		result := results[i]
-		idx, _ := decodeIndex(result.Data)
+		idx, err := decodeIndex(result.Data)
+		if err != nil {
+			return fmt.Errorf("delete: %w", err)
+		}
 		if idx.Label == label {
-			// Convert to history
-			db.writeAt(idx.Offset+7, []byte("3"))
-
-			// Blank _d content
-			record, _ := line(db.reader, idx.Offset)
-			dStart := strings.Index(string(record), `"_d":"`) + 6
-			dEnd := strings.Index(string(record), `","_h":"`)
-			if dStart > 5 && dEnd > dStart {
-				db.writeAt(idx.Offset+int64(dStart), bytes.Repeat([]byte(" "), dEnd-dStart))
+			if err := blank(db, idx.Offset, &result); err != nil {
+				return fmt.Errorf("delete: %w", err)
 			}
-
-			// Blank index
-			db.writeAt(result.Offset, bytes.Repeat([]byte(" "), result.Length))
 			return nil
 		}
 	}
 
 	return ErrNotFound
+}
+
+// blank retires a record: patches its type from Record to History (2→3),
+// overwrites _d with spaces so it doesn't appear in content searches,
+// and erases the index line so the document is no longer discoverable.
+// The _h field is left intact for version retrieval.
+func blank(db *DB, dataOff int64, idx *Result) error {
+	db.writeAt(dataOff+7, []byte("3"))
+
+	record, err := line(db.reader, dataOff)
+	if err != nil {
+		return fmt.Errorf("read record: %w", err)
+	}
+	dStart := strings.Index(string(record), `"_d":"`) + 6
+	dEnd := strings.Index(string(record), `","_h":"`)
+	if dStart > 5 && dEnd > dStart {
+		db.writeAt(dataOff+int64(dStart), bytes.Repeat([]byte(" "), dEnd-dStart))
+	}
+
+	db.writeAt(idx.Offset, bytes.Repeat([]byte(" "), idx.Length))
+	return nil
 }

@@ -189,7 +189,7 @@ func BenchmarkDecompress1KB(b *testing.B) {
 	compressed := compress(data)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		decompress(compressed)
+		decompress(compressed) //nolint:errcheck
 	}
 }
 

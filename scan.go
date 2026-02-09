@@ -1,8 +1,16 @@
-// Scan operations for finding records in the database file.
+// Scan strategies for the two-region file layout.
 //
-// Binary search (scan) works on sorted sections. Linear search (sparse)
-// works on unsorted append-only sections. Minimal scan (scanm) extracts
-// only metadata for compaction without full JSON parsing.
+// After compaction the file contains sorted sections where records are
+// ordered by ID. New writes are appended after the sorted sections into a
+// sparse (unsorted) region. Lookups therefore need two strategies:
+//
+//   - scan: binary search over a sorted section. O(log n) seeks.
+//   - sparse: linear scan over the unsorted region. O(n) but bounded to
+//     records written since the last compaction.
+//
+// scanm is a compaction-only variant that extracts metadata at fixed byte
+// positions without JSON parsing, since compaction must touch every record
+// but only needs ID, type, timestamp, and label.
 package folio
 
 import (
@@ -14,8 +22,11 @@ import (
 	"strconv"
 )
 
-// scan performs binary search on a sorted section for a record matching id and type.
-// Returns nil if not found.
+// scan performs binary search between start and end for a record whose ID
+// matches id. Because records are variable-length, the midpoint may land
+// inside a record, so we align to the nearest newline to find a valid pivot.
+// If the forward alignment fails (e.g. lands past end), we fall back to
+// scanning backwards for a pivot.
 func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 	if start >= end {
 		return nil
@@ -27,7 +38,6 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 	var pivot *Result
 	var pivotEnd int64
 
-	// Try forward first - find record starting after mid
 	newlinePos, _ := align(f, mid)
 	if newlinePos >= 0 && newlinePos+1 < end {
 		recordStart := newlinePos + 1
@@ -41,7 +51,6 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 		}
 	}
 
-	// If no valid forward pivot, try backward
 	if pivot == nil {
 		pivot = scanBack(f, mid, start, recordType)
 		if pivot != nil {
@@ -49,7 +58,6 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 		}
 	}
 
-	// No valid records in range
 	if pivot == nil {
 		return nil
 	}
@@ -63,11 +71,11 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 	return scan(f, id, pivotEnd, end, recordType)
 }
 
-// scanBack scans backwards from pos to find the first valid record of the given type.
+// scanBack walks backwards byte-by-byte to find a valid pivot when the
+// forward alignment in scan lands outside the search range.
 func scanBack(f *os.File, pos, start int64, recordType int) *Result {
 	for pos > start {
 		pos--
-		// Find previous newline
 		for pos > start {
 			buf := make([]byte, 1)
 			f.ReadAt(buf, pos)
@@ -95,7 +103,8 @@ func scanBack(f *os.File, pos, start int64, recordType int) *Result {
 	return nil
 }
 
-// scanFwd scans forwards from pos to find the first valid record of the given type.
+// scanFwd walks forward line-by-line. Used when we need the first record
+// of a given type in a region (e.g. finding the start of the index section).
 func scanFwd(f *os.File, pos, end int64, recordType int) *Result {
 	for pos < end {
 		data, err := line(f, pos)
@@ -115,8 +124,9 @@ func scanFwd(f *os.File, pos, end int64, recordType int) *Result {
 	return nil
 }
 
-// sparse performs linear scan for records matching id and type in an unsorted section.
-// If id is empty, returns all records of the given type.
+// sparse linearly scans an unsorted region. Every record is JSON-parsed
+// because IDs are not in sorted order — there is no way to short-circuit.
+// Pass an empty id to collect all records of the given type (used by List).
 func sparse(f *os.File, id string, start, end int64, recordType int) []Result {
 	var results []Result
 
@@ -133,8 +143,7 @@ func sparse(f *os.File, id string, start, end int64, recordType int) []Result {
 			record, err := decode(data)
 			if err == nil && record.Type == recordType {
 				if id == "" || record.ID == id {
-					// Copy data since scanner reuses buffer
-					dataCopy := make([]byte, length)
+					dataCopy := make([]byte, length) // scanner reuses its buffer
 					copy(dataCopy, data)
 					results = append(results, Result{offset, length, dataCopy, record.ID})
 				}
@@ -147,8 +156,11 @@ func sparse(f *os.File, id string, start, end int64, recordType int) []Result {
 	return results
 }
 
-// scanm performs minimal scan extracting only metadata without full JSON parsing.
-// Used by compaction. Pass recordType=0 to get all types.
+// scanm extracts metadata at fixed byte positions without JSON parsing.
+// This is safe because every record starts with {"idx":N,"_id":"...","_ts":N
+// and these fields are always serialised in the same order and width.
+// Pass recordType=0 to collect all types. Used by compaction and bloom
+// filter construction where only ID, type, and timestamp are needed.
 func scanm(f *os.File, start, end int64, recordType int) []Entry {
 	var entries []Entry
 
@@ -162,11 +174,10 @@ func scanm(f *os.File, start, end int64, recordType int) []Entry {
 		length := len(ln)
 
 		if valid(ln) && length >= MinRecordSize {
-			// Fixed positions: {"idx":N,"_id":"XXXXXXXXXXXXXXXX","_ts":NNNNNNNNNNNNN
-			t := int(ln[7] - '0')
+			t := int(ln[7] - '0')  // {"idx":N — type at byte 7
 			if recordType == 0 || t == recordType {
-				id := string(ln[16:32])
-				ts, _ := strconv.ParseInt(string(ln[40:53]), 10, 64)
+				id := string(ln[16:32])  // _id at bytes 16..31
+				ts, _ := strconv.ParseInt(string(ln[40:53]), 10, 64) // _ts at bytes 40..52
 				lbl := ""
 				if t == TypeIndex {
 					lbl = label(ln)
@@ -181,8 +192,9 @@ func scanm(f *os.File, start, end int64, recordType int) []Entry {
 	return entries
 }
 
-// unpack separates entries into data and index slices for compaction.
-// The exclude slice specifies record types to omit from the data slice.
+// unpack splits entries for compaction: indexes go to one slice, everything
+// else to data. The exclude list lets callers drop specific types (e.g.
+// TypeHistory during purge).
 func unpack(entries []Entry, exclude ...int) (data, indexes []Entry) {
 	for _, e := range entries {
 		if e.Type == TypeIndex {
@@ -194,7 +206,8 @@ func unpack(entries []Entry, exclude ...int) (data, indexes []Entry) {
 	return data, indexes
 }
 
-// byIDThenTS is a comparator for sorting entries by ID, then by timestamp (older first).
+// byIDThenTS sorts entries for compaction output. Records with the same ID
+// are ordered oldest-first so that the last entry wins during deduplication.
 func byIDThenTS(a, b Entry) int {
 	if c := cmp.Compare(a.ID, b.ID); c != 0 {
 		return c
@@ -202,7 +215,6 @@ func byIDThenTS(a, b Entry) int {
 	return cmp.Compare(a.TS, b.TS)
 }
 
-// byID is a comparator for sorting entries by ID only.
 func byID(a, b *Entry) int {
 	return cmp.Compare(a.ID, b.ID)
 }

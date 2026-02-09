@@ -1,38 +1,30 @@
-// Package folio provides a disk-first document database with versioning.
+// Package folio provides an append-only document database backed by a single
+// JSONL file. Documents are stored as newline-delimited JSON records with
+// automatic versioning — every update preserves the previous content as a
+// compressed history snapshot.
 //
-// Folio stores JSON documents in an append-only file format with automatic
-// history tracking. All operations work efficiently from disk without
-// requiring in-memory indexes.
+// The file is divided into sorted and sparse regions. Sorted regions support
+// binary search after compaction; the sparse region collects new writes and
+// is scanned linearly. Compaction merges the sparse region back into sorted
+// order. This design keeps all state on disk without requiring in-memory
+// indexes, though an optional bloom filter can accelerate negative lookups
+// in the sparse region.
 package folio
 
 import "errors"
 
-// Sentinel errors returned by database operations.
+// Sentinel errors for programmatic handling. Callers can use errors.Is to
+// distinguish recoverable conditions (ErrNotFound) from corruption
+// (ErrCorruptHeader, ErrCorruptRecord, ErrCorruptIndex, ErrDecompress).
 var (
-	// ErrNotFound is returned when a document does not exist.
-	ErrNotFound = errors.New("document not found")
-
-	// ErrLabelTooLong is returned when a label exceeds MaxLabelSize bytes.
-	ErrLabelTooLong = errors.New("label exceeds maximum size")
-
-	// ErrInvalidLabel is returned when a label contains prohibited characters.
-	ErrInvalidLabel = errors.New("label contains invalid characters")
-
-	// ErrEmptyContent is returned when attempting to store empty content.
-	ErrEmptyContent = errors.New("content cannot be empty")
-
-	// ErrClosed is returned when operating on a closed database.
-	ErrClosed = errors.New("database is closed")
-
-	// ErrInvalidPattern is returned when a regex pattern fails to compile.
+	ErrNotFound       = errors.New("document not found")
+	ErrLabelTooLong   = errors.New("label exceeds maximum size")
+	ErrInvalidLabel   = errors.New("label contains invalid characters")
+	ErrEmptyContent   = errors.New("content cannot be empty")
+	ErrClosed         = errors.New("database is closed")
 	ErrInvalidPattern = errors.New("invalid regex pattern")
-
-	// ErrCorruptHeader is returned when the header cannot be parsed.
-	ErrCorruptHeader = errors.New("corrupt header")
-
-	// ErrCorruptRecord is returned when a data record cannot be parsed.
-	ErrCorruptRecord = errors.New("corrupt record")
-
-	// ErrCorruptIndex is returned when an index record cannot be parsed.
-	ErrCorruptIndex = errors.New("corrupt index")
+	ErrCorruptHeader  = errors.New("corrupt header")
+	ErrCorruptRecord  = errors.New("corrupt record")
+	ErrCorruptIndex   = errors.New("corrupt index")
+	ErrDecompress     = errors.New("decompression failed")
 )

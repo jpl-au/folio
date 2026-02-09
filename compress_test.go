@@ -21,7 +21,10 @@ func TestCompressDecompressRoundTrip(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			encoded := compress(tt.data)
-			decoded := decompress(encoded)
+			decoded, err := decompress(encoded)
+			if err != nil {
+				t.Fatalf("decompress: %v", err)
+			}
 
 			if !bytes.Equal(decoded, tt.data) {
 				t.Errorf("round trip failed: got %v, want %v", decoded, tt.data)
@@ -38,7 +41,10 @@ func TestCompressEmpty(t *testing.T) {
 }
 
 func TestDecompressEmpty(t *testing.T) {
-	result := decompress("")
+	result, err := decompress("")
+	if err != nil {
+		t.Fatalf("decompress: %v", err)
+	}
 	if result != nil {
 		t.Errorf("decompress(empty) = %v, want nil", result)
 	}
@@ -49,7 +55,10 @@ func TestCompressLargeData(t *testing.T) {
 	data := bytes.Repeat([]byte("test data for compression "), 40000)
 
 	encoded := compress(data)
-	decoded := decompress(encoded)
+	decoded, err := decompress(encoded)
+	if err != nil {
+		t.Fatalf("decompress: %v", err)
+	}
 
 	if !bytes.Equal(decoded, data) {
 		t.Errorf("large data round trip failed: lengths got %d, want %d", len(decoded), len(data))
@@ -87,7 +96,10 @@ func TestCompressBinaryData(t *testing.T) {
 	}
 
 	encoded := compress(data)
-	decoded := decompress(encoded)
+	decoded, err := decompress(encoded)
+	if err != nil {
+		t.Fatalf("decompress: %v", err)
+	}
 
 	if !bytes.Equal(decoded, data) {
 		t.Error("binary data round trip failed")

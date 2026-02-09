@@ -1,28 +1,33 @@
-// Search operations for content and label matching.
+// Regex search over document content and labels.
+//
+// Search scans data records (idx=2) and matches against the _d field.
+// MatchLabel scans index records (idx=1) and matches against _l.
+// Both stream through the file line-by-line to avoid loading it into memory.
 package folio
 
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"regexp"
 )
 
-// SearchOptions configures search behaviour.
 type SearchOptions struct {
 	CaseSensitive bool
 	Limit         int
-	Decode        bool // true = unescape _d content before matching
+	Decode        bool // unescape JSON string escapes in _d before matching
 }
 
-// Match represents a search result.
 type Match struct {
 	Label  string
 	Offset int64
 }
 
-// Search performs regex search within document content (_d fields only).
-// Only current data records (idx=2) are searched.
+// Search matches a regex against the _d field of current data records.
+// Content is extracted by byte-scanning for the _d and _h field delimiters
+// rather than JSON-parsing each line, keeping memory proportional to the
+// read buffer rather than the largest record.
 func (db *DB) Search(pattern string, opts SearchOptions) ([]Match, error) {
 	if err := db.blockRead(); err != nil {
 		return nil, err
@@ -41,7 +46,11 @@ func (db *DB) Search(pattern string, opts SearchOptions) ([]Match, error) {
 		return nil, ErrInvalidPattern
 	}
 
-	section := io.NewSectionReader(db.reader, HeaderSize, size(db.reader)-HeaderSize)
+	sz, err := size(db.reader)
+	if err != nil {
+		return nil, fmt.Errorf("search: stat: %w", err)
+	}
+	section := io.NewSectionReader(db.reader, HeaderSize, sz-HeaderSize)
 	scanner := bufio.NewScanner(section)
 	scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
 
@@ -84,7 +93,9 @@ func (db *DB) Search(pattern string, opts SearchOptions) ([]Match, error) {
 	return results, nil
 }
 
-// MatchLabel performs regex search on document labels.
+// MatchLabel matches a regex against the _l field of index records.
+// Only index lines (idx=1) are checked, so the scan skips data records
+// entirely using the type byte at position 7.
 func (db *DB) MatchLabel(pattern string) ([]Match, error) {
 	if err := db.blockRead(); err != nil {
 		return nil, err
@@ -94,15 +105,17 @@ func (db *DB) MatchLabel(pattern string) ([]Match, error) {
 		db.lock.Unlock()
 	}()
 
-	// Regex to match label within an Index record
-	// Expects format: {"idx":1...,"_l":"...pattern..."
 	fullPattern := `(?i){"idx":1.*"_l":"[^"]*` + pattern + `[^"]*"`
 	re, err := regexp.Compile(fullPattern)
 	if err != nil {
 		return nil, ErrInvalidPattern
 	}
 
-	section := io.NewSectionReader(db.reader, 0, size(db.reader))
+	sz, err := size(db.reader)
+	if err != nil {
+		return nil, fmt.Errorf("matchlabel: stat: %w", err)
+	}
+	section := io.NewSectionReader(db.reader, 0, sz)
 	scanner := bufio.NewScanner(section)
 	scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
 
@@ -112,9 +125,7 @@ func (db *DB) MatchLabel(pattern string) ([]Match, error) {
 	for scanner.Scan() {
 		line := scanner.Bytes()
 
-		// Optimization: Only check lines that look like Index records
-		// TypeIndex is 1, so {"idx":1
-		if len(line) > 8 && line[7] == '1' {
+		if len(line) > 8 && line[7] == '1' { // idx=1 → index record
 			loc := re.FindIndex(line)
 			if loc != nil {
 				lbl := label(line)

@@ -1,5 +1,7 @@
 //go:build windows
 
+// LockFileEx/UnlockFileEx implementation for Windows.
+// Both methods are called with l.mu held by the exported Lock/Unlock.
 package folio
 
 import (
@@ -14,7 +16,6 @@ var (
 )
 
 const (
-	// Windows lock flags
 	LOCKFILE_EXCLUSIVE_LOCK   = 0x00000002
 	LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
 )
@@ -25,22 +26,18 @@ func (l *fileLock) lock(mode LockMode) error {
 		flags |= LOCKFILE_EXCLUSIVE_LOCK
 	}
 
-	// Lock bytes 0 to max_uint32 (effectively the whole file region for our purposes)
-	// We overlay strict locking on the file handle.
-
+	// Blocking lock over the entire file region (0 to max).
 	h := syscall.Handle(l.f.Fd())
 	var overlapped syscall.Overlapped
 
-	// 0, 0, 0xFFFFFFFF, 0xFFFFFFFF = Lock region 0 to max
 	r1, _, err := procLockFileEx.Call(
 		uintptr(h),
 		uintptr(flags),
-		0,          // Reserved
-		0xFFFFFFFF, // Low bytes of length
-		0xFFFFFFFF, // High bytes of length
+		0,
+		0xFFFFFFFF,
+		0xFFFFFFFF,
 		uintptr(unsafe.Pointer(&overlapped)),
 	)
-
 	if r1 == 0 {
 		return err
 	}
@@ -53,7 +50,7 @@ func (l *fileLock) unlock() error {
 
 	r1, _, err := procUnlockFileEx.Call(
 		uintptr(h),
-		0, // Reserved
+		0,
 		0xFFFFFFFF,
 		0xFFFFFFFF,
 		uintptr(unsafe.Pointer(&overlapped)),

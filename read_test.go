@@ -157,7 +157,10 @@ func TestAlignMultipleNewlines(t *testing.T) {
 func TestSize(t *testing.T) {
 	f := createTestFile(t, "hello world")
 
-	s := size(f)
+	s, err := size(f)
+	if err != nil {
+		t.Fatalf("size: %v", err)
+	}
 	if s != 11 {
 		t.Errorf("size = %d, want 11", s)
 	}
@@ -166,7 +169,10 @@ func TestSize(t *testing.T) {
 func TestSizeEmpty(t *testing.T) {
 	f := createTestFile(t, "")
 
-	s := size(f)
+	s, err := size(f)
+	if err != nil {
+		t.Fatalf("size: %v", err)
+	}
 	if s != 0 {
 		t.Errorf("size(empty) = %d, want 0", s)
 	}
@@ -176,13 +182,21 @@ func TestPosition(t *testing.T) {
 	f := createTestFile(t, "content")
 
 	// Initial position is 0
-	if pos := position(f); pos != 0 {
+	pos, err := position(f)
+	if err != nil {
+		t.Fatalf("position: %v", err)
+	}
+	if pos != 0 {
 		t.Errorf("initial position = %d, want 0", pos)
 	}
 
 	// After seek
 	f.Seek(5, 0)
-	if pos := position(f); pos != 5 {
+	pos, err = position(f)
+	if err != nil {
+		t.Fatalf("position: %v", err)
+	}
+	if pos != 5 {
 		t.Errorf("after seek: position = %d, want 5", pos)
 	}
 }
@@ -193,7 +207,11 @@ func TestPositionAfterRead(t *testing.T) {
 	buf := make([]byte, 3)
 	f.Read(buf)
 
-	if pos := position(f); pos != 3 {
+	pos, err := position(f)
+	if err != nil {
+		t.Fatalf("position: %v", err)
+	}
+	if pos != 3 {
 		t.Errorf("after read: position = %d, want 3", pos)
 	}
 }

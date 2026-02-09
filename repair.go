@@ -1,10 +1,25 @@
-// Core repair operation for database maintenance.
+// Repair rebuilds the database file with all records in sorted order.
 //
-// Repair reorganises the file into sorted sections for efficient binary search.
-// It handles crash recovery and is the foundation for Compact and Purge.
+// Over time, appends accumulate in the sparse region and lookups degrade
+// toward linear scans. Repair reads every record, sorts by ID, and writes
+// a new file with contiguous sorted sections — restoring O(log n) binary
+// search. It also serves as crash recovery: on Open, if a .tmp file or
+// dirty flag is found, Repair is run automatically to restore consistency.
+//
+// The operation proceeds in two phases to minimise the time readers are
+// blocked:
+//
+//   - Phase 1 (read lock): scan the old file and write the new .tmp file.
+//     Concurrent readers continue using the old file.
+//   - Phase 2 (write lock): swap file handles from the old file to the new
+//     one. This is a brief exclusive lock for the atomic rename.
+//
+// When called for crash recovery (BlockReaders=true), a write lock is held
+// for the entire operation since the file may be inconsistent.
 package folio
 
 import (
+	"fmt"
 	json "github.com/goccy/go-json"
 	"io"
 	"maps"
@@ -12,19 +27,18 @@ import (
 	"slices"
 )
 
-// CompactOptions configures repair behaviour.
 type CompactOptions struct {
-	BlockReaders bool // true = block all operations (crash recovery)
-	PurgeHistory bool // true = remove history records
+	BlockReaders bool // hold write lock for entire operation (crash recovery)
+	PurgeHistory bool // drop history records from the output
 }
 
-// Repair reorganises the database file.
+// Repair rebuilds the file. See the package comment for phase details.
 func (db *DB) Repair(opts *CompactOptions) error {
 	if opts == nil {
 		opts = &CompactOptions{}
 	}
 
-	// Set state
+	// Restrict concurrent access for the duration of the rebuild
 	if opts.BlockReaders {
 		db.state.Store(StateNone)
 	} else {
@@ -38,25 +52,32 @@ func (db *DB) Repair(opts *CompactOptions) error {
 		db.cond.L.Unlock()
 	}()
 
-	// Create temp file
 	tmp, err := db.root.Create(db.name + ".tmp")
 	if err != nil {
-		return err
+		return fmt.Errorf("repair: create temp: %w", err)
 	}
 
-	// Phase 1: Heavy work
+	// Phase 1: scan old file, write new file
 	if opts.BlockReaders {
 		db.mu.Lock()
 	} else {
 		db.mu.RLock()
 	}
 
-	info, _ := db.reader.Stat()
+	info, err := db.reader.Stat()
+	if err != nil {
+		if opts.BlockReaders {
+			db.mu.Unlock()
+		} else {
+			db.mu.RUnlock()
+		}
+		tmp.Close()
+		return fmt.Errorf("repair: stat: %w", err)
+	}
 	entries := scanm(db.reader, HeaderSize, info.Size(), 0)
 
 	var records, history, indexes []Entry
 
-	// Separate entries by type
 	for _, e := range entries {
 		switch e.Type {
 		case TypeRecord:
@@ -70,32 +91,37 @@ func (db *DB) Repair(opts *CompactOptions) error {
 		}
 	}
 
-	// Sort Records and History by ID then TS
+	// Sorting by ID restores binary search; by TS within ID ensures the
+	// newest record for each ID is written last (and wins during lookup).
 	slices.SortFunc(records, byIDThenTS)
 	slices.SortFunc(history, byIDThenTS)
 
-	// Build index map by label
+	// Keyed by label so each document keeps exactly one index in the output.
+	// As records are written below, each index's DstOff is updated to the
+	// record's new position in the output file.
 	indexMap := map[string]*Entry{}
 	for i := range indexes {
 		indexMap[indexes[i].Label] = &indexes[i]
 	}
 
-	// Write header placeholder
-	tmp.Write(make([]byte, HeaderSize))
-
-	// Track write position
+	tmp.Write(make([]byte, HeaderSize)) // placeholder, overwritten at the end
 	ow := &offsetWriter{w: tmp, off: HeaderSize}
 
-	// 1. Write Data Records
+	// Write sections in order: records, history, indexes.
+	// This matches the layout described in the Header type so that the
+	// offset fields in the final header accurately delimit each section.
+
 	for i := range records {
 		entry := &records[i]
-		record, _ := line(db.reader, entry.SrcOff)
+		record, err := line(db.reader, entry.SrcOff)
+		if err != nil {
+			continue // skip unreadable records
+		}
 
 		entry.DstOff = ow.off
 		ow.Write(record)
 		ow.Write([]byte{'\n'})
 
-		// Update index pointer
 		lbl := label(record)
 		if idx, ok := indexMap[lbl]; ok {
 			idx.DstOff = entry.DstOff
@@ -104,15 +130,12 @@ func (db *DB) Repair(opts *CompactOptions) error {
 
 	historyStart := ow.off
 
-	// 2. Write History Records
 	for i := range history {
 		entry := &history[i]
-		record, _ := line(db.reader, entry.SrcOff)
-
-		// History doesn't need index updates (it's pointed to by the record's _h field usually,
-		// but actually folio history is self-contained in the record _h field usually?
-		// Wait, DESIGN.md says History Record is a separate record type `idx:3`.
-		// So we just write them block-by-block.
+		record, err := line(db.reader, entry.SrcOff)
+		if err != nil {
+			continue // skip unreadable records
+		}
 
 		entry.DstOff = ow.off
 		ow.Write(record)
@@ -121,25 +144,29 @@ func (db *DB) Repair(opts *CompactOptions) error {
 
 	dataEnd := ow.off
 
-	// 3. Write Index Records
+	// Indexes are rewritten with updated offsets pointing to the records'
+	// new positions in the output file.
 	sorted := slices.SortedFunc(maps.Values(indexMap), byID)
 	for _, idx := range sorted {
-		indexRecord, _ := json.Marshal(Index{
+		indexRecord, err := json.Marshal(Index{
 			Type:      TypeIndex,
 			ID:        idx.ID,
-			Offset:    idx.DstOff, // Points to the new location of the Data Record
+			Offset:    idx.DstOff,
 			Label:     idx.Label,
 			Timestamp: now(),
 		})
+		if err != nil {
+			continue // skip unserializable indexes
+		}
 		ow.Write(indexRecord)
 		ow.Write([]byte{'\n'})
 	}
 
 	indexEnd := ow.off
 
-	// Write final header
+	// Now that all sections are written, we know their boundary offsets.
 	hdr := Header{
-		Version:   2, // New version
+		Version:   2,
 		Timestamp: now(),
 		Algorithm: db.header.Algorithm,
 		History:   historyStart,
@@ -147,25 +174,57 @@ func (db *DB) Repair(opts *CompactOptions) error {
 		Index:     indexEnd,
 		Error:     0,
 	}
-	hdrBytes, _ := hdr.encode()
+	hdrBytes, err := hdr.encode()
+	if err != nil {
+		if opts.BlockReaders {
+			db.mu.Unlock()
+		} else {
+			db.mu.RUnlock()
+		}
+		tmp.Close()
+		return fmt.Errorf("repair: encode header: %w", err)
+	}
 	tmp.WriteAt(hdrBytes, 0)
 	tmp.Sync()
 	tmp.Close()
 
-	// Phase 2: Swap handles
+	// Phase 2: swap file handles — brief exclusive lock
 	if !opts.BlockReaders {
 		db.mu.RUnlock()
 		db.mu.Lock()
 	}
 	defer db.mu.Unlock()
 
+	// Drain in-flight flock calls before closing the fd (see lock.go)
+	db.lock.setFile(nil)
+
 	db.reader.Close()
 	db.writer.Close()
-	db.root.Rename(db.name+".tmp", db.name)
-	db.reader, _ = db.root.OpenFile(db.name, os.O_RDONLY, 0644)
-	db.writer, _ = db.root.OpenFile(db.name, os.O_RDWR, 0644)
-	db.lock.f = db.writer
-	db.header, _ = header(db.reader)
+
+	if err := db.root.Rename(db.name+".tmp", db.name); err != nil {
+		return fmt.Errorf("repair: rename: %w", err)
+	}
+
+	reader, err := db.root.OpenFile(db.name, os.O_RDONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("repair: reopen reader: %w", err)
+	}
+	writer, err := db.root.OpenFile(db.name, os.O_RDWR, 0644)
+	if err != nil {
+		reader.Close()
+		return fmt.Errorf("repair: reopen writer: %w", err)
+	}
+	hdrParsed, err := header(reader)
+	if err != nil {
+		reader.Close()
+		writer.Close()
+		return fmt.Errorf("repair: read header: %w", err)
+	}
+
+	db.reader = reader
+	db.writer = writer
+	db.lock.setFile(db.writer)
+	db.header = hdrParsed
 	db.tail = indexEnd
 
 	if db.bloom != nil {
@@ -175,7 +234,9 @@ func (db *DB) Repair(opts *CompactOptions) error {
 	return nil
 }
 
-// offsetWriter tracks write position for sequential writes.
+// offsetWriter adapts WriterAt to sequential writes. Repair needs WriterAt
+// (to backfill the header at offset 0 after all sections are written) but
+// also needs to track the current position for section boundary offsets.
 type offsetWriter struct {
 	w   io.WriterAt
 	off int64

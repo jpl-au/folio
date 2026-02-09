@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func dbsize(t *testing.T, db *DB) int64 {
+	t.Helper()
+	s, err := size(db.reader)
+	if err != nil {
+		t.Fatalf("size: %v", err)
+	}
+	return s
+}
+
 func TestConstants(t *testing.T) {
 	tests := []struct {
 		name string
@@ -109,7 +118,7 @@ func TestIndexRecordFormat(t *testing.T) {
 	db.Set("test", "content")
 
 	// Find index record
-	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeIndex)
+	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeIndex)
 	if len(results) == 0 {
 		t.Fatal("no index record found")
 	}
@@ -139,7 +148,7 @@ func TestDataRecordFormat(t *testing.T) {
 
 	db.Set("test", "content")
 
-	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeRecord)
+	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeRecord)
 	if len(results) == 0 {
 		t.Fatal("no data record found")
 	}
@@ -172,7 +181,7 @@ func TestHistoryRecordFormat(t *testing.T) {
 	db.Set("test", "v1")
 	db.Set("test", "v2") // v1 becomes history
 
-	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeHistory)
+	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeHistory)
 	if len(results) == 0 {
 		t.Fatal("no history record found")
 	}
@@ -235,7 +244,7 @@ func TestIDAtFixedPosition(t *testing.T) {
 
 	db.Set("test", "content")
 
-	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeRecord)
+	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeRecord)
 	if len(results) == 0 {
 		t.Fatal("no record found")
 	}
@@ -259,7 +268,7 @@ func TestTimestampAtFixedPosition(t *testing.T) {
 
 	db.Set("test", "content")
 
-	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeRecord)
+	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeRecord)
 	if len(results) == 0 {
 		t.Fatal("no record found")
 	}

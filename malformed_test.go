@@ -1,6 +1,7 @@
 package folio
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -134,7 +135,11 @@ func TestMalformedRecordSkippedInSparse(t *testing.T) {
 	db.raw([]byte(`{"idx":2,"_id":"0000000000000000","_ts":1234567890123,"_l":"another","_d":"data","_h":"hist"}`))
 
 	// Sparse scan should skip malformed
-	results := sparse(db.reader, "", HeaderSize, size(db.reader), TypeRecord)
+	sz, err := size(db.reader)
+	if err != nil {
+		t.Fatalf("size: %v", err)
+	}
+	results := sparse(db.reader, "", HeaderSize, sz, TypeRecord)
 
 	// Should have found valid records, skipped malformed
 	if len(results) < 1 {
@@ -150,7 +155,11 @@ func TestMalformedRecordSkippedInScanm(t *testing.T) {
 	// Manually write short data that passes valid() but fails scanm checks
 	db.raw([]byte(`{short}`))
 
-	entries := scanm(db.reader, HeaderSize, size(db.reader), 0)
+	sz, err := size(db.reader)
+	if err != nil {
+		t.Fatalf("size: %v", err)
+	}
+	entries := scanm(db.reader, HeaderSize, sz, 0)
 
 	// Should have found valid entries
 	if len(entries) < 1 {
@@ -176,10 +185,13 @@ func TestBlankedRecordSkipped(t *testing.T) {
 
 func TestCompressDecompressErrorPath(t *testing.T) {
 	// Decompress invalid data
-	result := decompress("not valid base85")
+	_, err := decompress("not valid base85")
 
-	// Should return empty or handle gracefully
-	if len(result) != 0 {
-		t.Logf("decompress invalid returned %d bytes", len(result))
+	// Should return an error
+	if err == nil {
+		t.Error("decompress(invalid) should return error")
+	}
+	if !errors.Is(err, ErrDecompress) {
+		t.Errorf("decompress(invalid) error = %v, want ErrDecompress", err)
 	}
 }

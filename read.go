@@ -1,7 +1,9 @@
-// Low-level read operations for file access.
+// Low-level read primitives for the newline-delimited record format.
 //
-// These primitives handle newline-delimited record reading and position tracking.
-// All operations use io.SectionReader for bounded, concurrent-safe access.
+// Every record is a single JSON line terminated by '\n'. These functions
+// read individual lines, find record boundaries, and query file size —
+// all via SectionReader or ReadAt so that concurrent readers sharing a
+// single *os.File do not interfere with each other's offsets.
 package folio
 
 import (
@@ -10,8 +12,9 @@ import (
 	"os"
 )
 
-// line reads a complete record from offset until newline.
-// Returns bytes excluding the trailing newline character.
+// line reads the record starting at offset up to the next newline.
+// SectionReader is used so the read is bounded by file size and does not
+// affect the shared file position.
 func line(f *os.File, offset int64) ([]byte, error) {
 	info, err := f.Stat()
 	if err != nil {
@@ -30,15 +33,15 @@ func line(f *os.File, offset int64) ([]byte, error) {
 		return nil, err
 	}
 
-	// Strip trailing newline if present
 	if len(data) > 0 && data[len(data)-1] == '\n' {
 		data = data[:len(data)-1]
 	}
 	return data, nil
 }
 
-// align finds the position of the next newline at or after offset.
-// Returns the byte position of the newline, or -1 if none found.
+// align finds the next newline at or after offset, returning its byte
+// position. Binary search lands at an arbitrary byte, so align is called
+// to advance to the nearest record boundary before reading a pivot.
 func align(f *os.File, offset int64) (int64, error) {
 	info, err := f.Stat()
 	if err != nil {
@@ -69,14 +72,18 @@ func align(f *os.File, offset int64) (int64, error) {
 	}
 }
 
-// size returns the file size in bytes.
-func size(f *os.File) int64 {
-	info, _ := f.Stat()
-	return info.Size()
+func size(f *os.File) (int64, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
 }
 
-// position returns the current file position.
-func position(f *os.File) int64 {
-	pos, _ := f.Seek(0, io.SeekCurrent)
-	return pos
+func position(f *os.File) (int64, error) {
+	pos, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, err
+	}
+	return pos, nil
 }

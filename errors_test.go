@@ -17,6 +17,7 @@ func TestErrors(t *testing.T) {
 		ErrCorruptHeader,
 		ErrCorruptRecord,
 		ErrCorruptIndex,
+		ErrDecompress,
 	}
 
 	// Check none are nil
@@ -52,6 +53,7 @@ func TestErrorsAreErrors(t *testing.T) {
 		{"ErrCorruptHeader", ErrCorruptHeader},
 		{"ErrCorruptRecord", ErrCorruptRecord},
 		{"ErrCorruptIndex", ErrCorruptIndex},
+		{"ErrDecompress", ErrDecompress},
 	}
 
 	for _, tt := range tests {

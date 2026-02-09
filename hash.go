@@ -1,7 +1,10 @@
-// Hash algorithm implementations for document identifiers.
+// Hash algorithms for deriving the _id field from a document label.
 //
-// The _id field is a 16 hex character hash of the label. Three algorithms
-// are supported, selectable via Config.HashAlgorithm.
+// _id is always 16 hex characters (64 bits). This fixed width is what
+// allows scanm to extract IDs at a known byte offset without parsing.
+// The algorithm is stored in the header so all records in a file use the
+// same one; Rehash can migrate between algorithms in place because the
+// output width is identical across all three.
 package folio
 
 import (
@@ -12,14 +15,12 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
-// Hash algorithm constants.
 const (
-	AlgXXHash3 = 1 // Default, fastest
-	AlgFNV1a   = 2 // No external dependencies
-	AlgBlake2b = 3 // Best distribution
+	AlgXXHash3 = 1 // default — fastest, good distribution
+	AlgFNV1a   = 2 // stdlib only, no external dependencies
+	AlgBlake2b = 3 // cryptographic quality distribution
 )
 
-// hash generates a 16 hex character ID from a label using the specified algorithm.
 func hash(label string, alg int) string {
 	switch alg {
 	case AlgXXHash3:

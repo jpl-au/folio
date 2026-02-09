@@ -1,36 +1,37 @@
-// In-memory bloom filter for sparse region lookups.
+// Optional bloom filter to accelerate negative lookups in the sparse region.
 //
-// Sized for ~10k entries at 1% false positive rate. Built on Open from
-// sparse IDs, maintained during the session, discarded on Close.
+// The sparse region is scanned linearly, so lookups for IDs that do not
+// exist there pay the full scan cost. When enabled (Config.BloomFilter),
+// the filter is populated from sparse index IDs at Open and updated on
+// each Set. A negative Contains result skips the sparse scan entirely.
+// The filter is deliberately small (~12KB) — sized for ~10k entries at
+// a 1% false positive rate — because false positives only add a linear
+// scan that would have happened anyway without the filter.
 package folio
 
 import (
 	"hash/fnv"
 )
 
-// Bloom filter sizing constants.
 const (
-	BloomSize = 11982 // bytes, ~96k bits for 10k entries at 1% FP
-	BloomK    = 7     // number of hash functions
+	BloomSize = 11982 // ~96k bits: -(10000*ln(0.01))/(ln(2)^2)
+	BloomK    = 7     // optimal k: (BloomSize*8/10000)*ln(2)
 )
 
 type bloom struct {
 	bits []byte
 }
 
-// newBloom returns a zeroed bloom filter.
 func newBloom() *bloom {
 	return &bloom{bits: make([]byte, BloomSize)}
 }
 
-// Add inserts an ID into the filter.
 func (b *bloom) Add(id string) {
 	for _, pos := range positions(id) {
 		b.bits[pos/8] |= 1 << (pos % 8)
 	}
 }
 
-// Contains returns true if the ID might be present, false if definitely absent.
 func (b *bloom) Contains(id string) bool {
 	for _, pos := range positions(id) {
 		if b.bits[pos/8]&(1<<(pos%8)) == 0 {
@@ -40,12 +41,14 @@ func (b *bloom) Contains(id string) bool {
 	return true
 }
 
-// Reset clears all bits.
+// Reset clears all bits. Called after compaction because the sparse region
+// is empty in the new file and the filter must be rebuilt from new appends.
 func (b *bloom) Reset() {
 	clear(b.bits)
 }
 
-// positions returns BloomK bit positions using double hashing (FNV-64a + FNV-32a).
+// positions derives BloomK bit indices using double hashing: h(i) = h1 + i*h2.
+// Two independent hashes (FNV-64a, FNV-32a) simulate k independent functions.
 func positions(id string) [BloomK]uint {
 	h64 := fnv.New64a()
 	h64.Write([]byte(id))

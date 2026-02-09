@@ -1,7 +1,8 @@
-// Header management for the database file.
-//
-// The header is exactly 88 bytes, padded with spaces and terminated with a newline.
-// It contains section offsets and state information for crash recovery.
+// The header occupies the first 128 bytes of the database file. It stores
+// byte offsets that divide the file into sections (records, history, indexes,
+// sparse) and a dirty flag for crash recovery. The fixed size allows the
+// dirty flag to be toggled with a single-byte write at a known offset,
+// avoiding a full header rewrite on every mutation.
 package folio
 
 import (
@@ -10,21 +11,31 @@ import (
 	"os"
 )
 
-// HeaderSize is the fixed size of the header in bytes.
+// HeaderSize is fixed so the dirty flag can be patched at a known byte
+// offset without rewriting the whole header.
 const HeaderSize = 128
 
-// Header contains database metadata stored at the start of the file.
+// Header describes the file layout. The offset fields divide the file into
+// contiguous sections that are read independently:
+//
+//	[0..128)           Header (this struct, space-padded, newline-terminated)
+//	[128..History)     Sorted data records  (binary searchable after compaction)
+//	[History..Data)    Sorted history records
+//	[Data..Index)      Sorted index records  (point back to data records)
+//	[Index..EOF)       Sparse region  (unsorted appends since last compaction)
+//
+// A zero offset means that section is empty or not yet established.
 type Header struct {
-	Version   int   `json:"_v"`   // 1=Legacy, 2=Current (128 bytes)
-	Error     int   `json:"_e"`   // 0=clean, 1=dirty (crash indicator)
-	Algorithm int   `json:"_alg"` // Hash algorithm (1=xxHash3, 2=FNV1a, 3=Blake2b)
-	Timestamp int64 `json:"_ts"`  // Unix milliseconds when written
-	History   int64 `json:"_h"`   // Byte offset: end of records / start of history
-	Data      int64 `json:"_d"`   // Byte offset: end of data/history section
-	Index     int64 `json:"_i"`   // Byte offset: end of index section
+	Version   int   `json:"_v"`   // Format version: 2 = current 128-byte header
+	Error     int   `json:"_e"`   // Dirty flag: 1 = unclean shutdown detected
+	Algorithm int   `json:"_alg"` // Hash algorithm used to derive _id from label
+	Timestamp int64 `json:"_ts"`  // Unix ms when this header was last written
+	History   int64 `json:"_h"`   // Byte offset where history section begins
+	Data      int64 `json:"_d"`   // Byte offset where index section begins
+	Index     int64 `json:"_i"`   // Byte offset where sparse region begins
 }
 
-// header reads and parses the header from a file.
+// header parses the fixed-size header from byte 0 of the file.
 func header(f *os.File) (*Header, error) {
 	buf := make([]byte, HeaderSize)
 	if _, err := f.ReadAt(buf, 0); err != nil {
@@ -38,8 +49,9 @@ func header(f *os.File) (*Header, error) {
 	return &hdr, nil
 }
 
-// dirty sets or clears the dirty flag at the fixed offset in the header.
-// The _e field is at byte offset 6: {"_e":X
+// dirty patches the _e field in place without rewriting the full header.
+// The value sits at byte 13: {"_v":2,"_e":X — this position is stable
+// because _v and _e are always serialised first and _v is single-digit.
 func dirty(w *os.File, v bool) error {
 	b := byte('0')
 	if v {
@@ -49,7 +61,9 @@ func dirty(w *os.File, v bool) error {
 	return err
 }
 
-// encode serialises the header to exactly HeaderSize bytes with padding.
+// encode serialises the header to exactly HeaderSize bytes, space-padded
+// with a trailing newline. The fixed size ensures the first data record
+// always starts at the same offset regardless of header content.
 func (h *Header) encode() ([]byte, error) {
 	data, err := json.Marshal(h)
 	if err != nil {
