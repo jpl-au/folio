@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/jpl-au/folio"
 )
@@ -13,7 +14,7 @@ func Example() {
 	defer os.RemoveAll(dir)
 
 	// Open or create a database
-	db, err := folio.Open(dir, "myapp.folio", folio.Config{})
+	db, err := folio.Open(filepath.Join(dir, "myapp.folio"), folio.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -34,7 +35,7 @@ func ExampleDB_Set() {
 	dir, _ := os.MkdirTemp("", "folio-example")
 	defer os.RemoveAll(dir)
 
-	db, _ := folio.Open(dir, "example.folio", folio.Config{})
+	db, _ := folio.Open(filepath.Join(dir, "example.folio"), folio.Config{})
 	defer db.Close()
 
 	// Create a new document
@@ -51,7 +52,7 @@ func ExampleDB_Get() {
 	dir, _ := os.MkdirTemp("", "folio-example")
 	defer os.RemoveAll(dir)
 
-	db, _ := folio.Open(dir, "example.folio", folio.Config{})
+	db, _ := folio.Open(filepath.Join(dir, "example.folio"), folio.Config{})
 	defer db.Close()
 
 	db.Set("greeting", "Hello, World!")
@@ -69,7 +70,7 @@ func ExampleDB_History() {
 	dir, _ := os.MkdirTemp("", "folio-example")
 	defer os.RemoveAll(dir)
 
-	db, _ := folio.Open(dir, "example.folio", folio.Config{})
+	db, _ := folio.Open(filepath.Join(dir, "example.folio"), folio.Config{})
 	defer db.Close()
 
 	// Create multiple versions
@@ -91,7 +92,7 @@ func ExampleDB_List() {
 	dir, _ := os.MkdirTemp("", "folio-example")
 	defer os.RemoveAll(dir)
 
-	db, _ := folio.Open(dir, "example.folio", folio.Config{})
+	db, _ := folio.Open(filepath.Join(dir, "example.folio"), folio.Config{})
 	defer db.Close()
 
 	db.Set("apple", "A fruit")
@@ -107,7 +108,7 @@ func ExampleDB_Delete() {
 	dir, _ := os.MkdirTemp("", "folio-example")
 	defer os.RemoveAll(dir)
 
-	db, _ := folio.Open(dir, "example.folio", folio.Config{})
+	db, _ := folio.Open(filepath.Join(dir, "example.folio"), folio.Config{})
 	defer db.Close()
 
 	db.Set("temp", "Temporary data")
@@ -124,7 +125,7 @@ func ExampleDB_Compact() {
 	dir, _ := os.MkdirTemp("", "folio-example")
 	defer os.RemoveAll(dir)
 
-	db, _ := folio.Open(dir, "example.folio", folio.Config{})
+	db, _ := folio.Open(filepath.Join(dir, "example.folio"), folio.Config{})
 	defer db.Close()
 
 	// After many writes, compact reorganises for faster reads
@@ -143,7 +144,7 @@ func ExampleDB_Search() {
 	dir, _ := os.MkdirTemp("", "folio-example")
 	defer os.RemoveAll(dir)
 
-	db, _ := folio.Open(dir, "example.folio", folio.Config{})
+	db, _ := folio.Open(filepath.Join(dir, "example.folio"), folio.Config{})
 	defer db.Close()
 
 	db.Set("readme", "# Welcome\n\nThis is the README file.")
@@ -166,6 +167,6 @@ func ExampleConfig() {
 		MaxRecordSize: 32 * 1024 * 1024,  // 32MB max record
 	}
 
-	db, _ := folio.Open(dir, "custom.folio", cfg)
+	db, _ := folio.Open(filepath.Join(dir, "custom.folio"), cfg)
 	defer db.Close()
 }

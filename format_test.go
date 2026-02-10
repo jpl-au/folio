@@ -47,7 +47,7 @@ func TestConstants(t *testing.T) {
 
 func TestHeaderFormat(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, "test.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{})
 	db.Close()
 
 	// Read raw header

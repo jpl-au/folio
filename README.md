@@ -1,14 +1,28 @@
 # Folio
 
-A JSONL-based document database for Go with automatic version history.
+A JSONL document store where the file is the interface. One `.folio` file
+holds your data as plain text — readable by `grep`, `jq`, any JSONL-capable
+tool, or an LLM, without the engine running. The Go library adds binary
+search, concurrent access, and automatic versioning on top of the same file.
 
-## Features
+The format is designed so every access path returns correct results: current
+content is plaintext in `_d` and grep-searchable, old versions are compressed
+in `_h` and invisible to text search, and record types are filterable by a
+single field (`idx`).
 
-- **JSONL format**: plain text, grep-searchable, LLM-friendly
-- **Automatic versioning**: every update preserves a compressed snapshot
-- **Disk-first**: minimal memory footprint, scans file directly
-- **Thread-safe**: safe for concurrent use with layered locking
-- **Single file**: no external dependencies, no server
+```bash
+# These work without Go, without a server, without anything
+grep '"_d":".*TODO' docs.folio               # search content
+grep -o '"_l":"[^"]*"' docs.folio | sort -u  # list documents
+jq -r 'select(.idx == 2) | ._d' docs.folio  # extract all content
+```
+
+```go
+// Or use the Go library for structured access
+db, _ := folio.Open("docs.folio", folio.Config{})
+db.Set("my-doc", "Hello, World!")
+content, _ := db.Get("my-doc")
+```
 
 ## Install
 
@@ -28,43 +42,34 @@ import (
 )
 
 func main() {
-    db, err := folio.Open("data", "docs.folio", folio.Config{})
+    db, err := folio.Open("data/docs.folio", folio.Config{})
     if err != nil {
         log.Fatal(err)
     }
     defer db.Close()
 
-    // Create or update a document
     if err := db.Set("my-doc", "Hello, World!"); err != nil {
         log.Fatal(err)
     }
 
-    // Read it back
     content, err := db.Get("my-doc")
     if err != nil {
         log.Fatal(err)
     }
     fmt.Println(content) // "Hello, World!"
 
-    // List all labels
-    labels, err := db.List()
-
-    // Search content with regex
-    matches, err := db.Search("Hello", folio.SearchOptions{})
-
-    // Search labels with regex
-    labelMatches, err := db.MatchLabel("my-.*")
-
-    // Get version history
-    versions, err := db.History("my-doc")
+    labels, err := db.List()             // all document labels
+    matches, err := db.Search("Hello", folio.SearchOptions{})  // regex on content
+    versions, err := db.History("my-doc") // all previous versions
 }
 ```
 
+> Error handling omitted for brevity. All methods return errors that should be checked.
+
 ## File Format
 
-Folio stores data as JSONL (one JSON object per line). The first line is a
-fixed-size header; subsequent lines are records. Three record types are
-distinguished by the `idx` field:
+Every `.folio` file is valid JSONL. The first line is a fixed-size header;
+subsequent lines are records distinguished by the `idx` field:
 
 ```
 {"_v":2,"_e":0,"_alg":1,"_ts":1706000000000,"_h":0,"_d":0,"_i":0}       <- Header (128 bytes, space-padded)
@@ -75,17 +80,11 @@ distinguished by the `idx` field:
 
 Current content lives in `_d` and is plaintext — grep-searchable directly.
 Previous versions are Zstd-compressed and Ascii85-encoded in the `_h` field,
-retrievable through the History API.
+retrievable through the History API or any language with Zstd and Ascii85
+support.
 
-```bash
-# Search current content
-grep '"_d":".*TODO' docs.folio
-
-# List document labels
-grep -o '"_l":"[^"]*"' docs.folio | sort -u
-```
-
-See [USAGE.md](USAGE.md) for more command-line examples.
+See [USAGE.md](USAGE.md) for command-line examples and
+[PORTING.md](PORTING.md) for the full format specification.
 
 ## API
 
@@ -110,15 +109,16 @@ db.History(label string) ([]Version, error)                      // All versions
 ### Maintenance
 
 ```go
-db.Compact() error    // Sort and reclaim space, keep history
-db.Purge() error      // Sort and reclaim space, remove all history
-db.Rehash(alg) error  // Migrate to a different hash algorithm
+db.Compact() error                        // Sort and reclaim space, keep history
+db.Purge() error                          // Sort and reclaim space, remove all history
+db.Rehash(alg) error                      // Migrate to a different hash algorithm
+db.Repair(opts *CompactOptions) error     // Rebuild from a corrupted file
 ```
 
 ## Configuration
 
 ```go
-db, err := folio.Open("data", "docs.folio", folio.Config{
+db, err := folio.Open("data/docs.folio", folio.Config{
     HashAlgorithm: folio.AlgXXHash3,  // default; also AlgFNV1a, AlgBlake2b
     ReadBuffer:    64 * 1024,         // scanner buffer size (default 64KB)
     MaxRecordSize: 16 * 1024 * 1024,  // largest record allowed (default 16MB)
@@ -137,6 +137,7 @@ Lookups for absent documents skip the linear scan entirely.
 ## Documentation
 
 - [USAGE.md](USAGE.md) - Command-line usage and grep examples
+- [PORTING.md](PORTING.md) - Format specification and implementation guide
 
 ## License
 

@@ -9,7 +9,7 @@ import (
 func openTestDB(t *testing.T) *DB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := Open(dir, "test.folio", Config{})
+	db, err := Open(filepath.Join(dir, "test.folio"), Config{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -19,7 +19,7 @@ func openTestDB(t *testing.T) *DB {
 
 func TestOpenCreateNew(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(dir, "test.folio", Config{})
+	db, err := Open(filepath.Join(dir, "test.folio"), Config{})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -34,11 +34,11 @@ func TestOpenCreateNew(t *testing.T) {
 func TestOpenExisting(t *testing.T) {
 	dir := t.TempDir()
 
-	db1, _ := Open(dir, "test.folio", Config{})
+	db1, _ := Open(filepath.Join(dir, "test.folio"), Config{})
 	db1.Set("doc", "content")
 	db1.Close()
 
-	db2, err := Open(dir, "test.folio", Config{})
+	db2, err := Open(filepath.Join(dir, "test.folio"), Config{})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestOpenDefaultConfig(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, "test.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{})
 	db.Set("doc", "content")
 
 	if err := db.Close(); err != nil {

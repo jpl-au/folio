@@ -1,6 +1,7 @@
 package folio
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -80,7 +81,7 @@ func TestRehashAllAlgorithms(t *testing.T) {
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			dir := t.TempDir()
-			db, _ := Open(dir, "test.folio", Config{HashAlgorithm: tt.from})
+			db, _ := Open(filepath.Join(dir, "test.folio"), Config{HashAlgorithm: tt.from})
 			defer db.Close()
 
 			db.Set("doc", "content")

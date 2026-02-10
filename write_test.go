@@ -35,7 +35,7 @@ func TestRawUpdatesTail(t *testing.T) {
 
 func TestRawAddsNewline(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, "test.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{})
 	defer db.Close()
 
 	data := []byte(`{"test":"data"}`)
@@ -117,7 +117,7 @@ func TestAppend(t *testing.T) {
 
 func TestWriteAtOverwrites(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, "test.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{})
 	defer db.Close()
 
 	// Write initial data
@@ -148,7 +148,7 @@ func TestWriteAtDoesNotAffectTail(t *testing.T) {
 
 func TestWriteAtWithSyncWrites(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, "test.folio", Config{SyncWrites: true})
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{SyncWrites: true})
 	defer db.Close()
 
 	db.raw([]byte(`{"test":"data"}`))
@@ -162,7 +162,7 @@ func TestWriteAtWithSyncWrites(t *testing.T) {
 
 func TestRawWithSyncWrites(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, "test.folio", Config{SyncWrites: true})
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{SyncWrites: true})
 	defer db.Close()
 
 	_, err := db.raw([]byte(`{"test":"data"}`))

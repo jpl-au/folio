@@ -1,6 +1,7 @@
 package folio
 
 import (
+	"path/filepath"
 	"strconv"
 	"testing"
 )
@@ -52,7 +53,7 @@ func TestBloomFPRate(t *testing.T) {
 
 func TestGetBloomSkipsSparse(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(dir, "test.folio", Config{BloomFilter: true})
+	db, err := Open(filepath.Join(dir, "test.folio"), Config{BloomFilter: true})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestGetBloomSkipsSparse(t *testing.T) {
 
 func TestExistsBloomSkipsSparse(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(dir, "test.folio", Config{BloomFilter: true})
+	db, err := Open(filepath.Join(dir, "test.folio"), Config{BloomFilter: true})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestExistsBloomSkipsSparse(t *testing.T) {
 
 func TestBloomAfterCompact(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(dir, "test.folio", Config{BloomFilter: true})
+	db, err := Open(filepath.Join(dir, "test.folio"), Config{BloomFilter: true})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -141,7 +142,7 @@ func TestBloomAfterCompact(t *testing.T) {
 
 func TestBloomDisabled(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(dir, "test.folio", Config{BloomFilter: false})
+	db, err := Open(filepath.Join(dir, "test.folio"), Config{BloomFilter: false})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

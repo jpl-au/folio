@@ -1,6 +1,7 @@
 package folio
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -13,7 +14,7 @@ func TestLocking(t *testing.T) {
 	}
 
 	// Process 1: Open DB
-	db1, err := Open(tmp, "test.folio", cfg)
+	db1, err := Open(filepath.Join(tmp, "test.folio"), cfg)
 	if err != nil {
 		t.Fatalf("d1 open failed: %v", err)
 	}
@@ -21,7 +22,7 @@ func TestLocking(t *testing.T) {
 
 	// Process 2: Open DB (should succeed finding file, sharing lock is tricky to test in same process if flock is file-descriptor based)
 	// flock is usually fd-based. If we open the file again, we get a new fd.
-	db2, err := Open(tmp, "test.folio", cfg)
+	db2, err := Open(filepath.Join(tmp, "test.folio"), cfg)
 	if err != nil {
 		t.Fatalf("db2 open failed: %v", err)
 	}
@@ -75,10 +76,10 @@ func TestReadWriteLocking(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := Config{HashAlgorithm: AlgXXHash3}
 
-	db1, _ := Open(tmp, "rw.folio", cfg)
+	db1, _ := Open(filepath.Join(tmp, "rw.folio"), cfg)
 	defer db1.Close()
 
-	db2, _ := Open(tmp, "rw.folio", cfg)
+	db2, _ := Open(filepath.Join(tmp, "rw.folio"), cfg)
 	defer db2.Close()
 
 	// DB1 holds Shared Lock (Read)

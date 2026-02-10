@@ -99,7 +99,7 @@ func TestCrashRecoveryDirtyFlag(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create DB and set dirty flag
-	db1, _ := Open(dir, "test.folio", Config{})
+	db1, _ := Open(filepath.Join(dir, "test.folio"), Config{})
 	db1.Set("doc", "content")
 	// Don't close cleanly - leave dirty flag set
 
@@ -111,7 +111,7 @@ func TestCrashRecoveryDirtyFlag(t *testing.T) {
 	db1.root.Close()
 
 	// Reopen - should trigger repair
-	db2, err := Open(dir, "test.folio", Config{})
+	db2, err := Open(filepath.Join(dir, "test.folio"), Config{})
 	if err != nil {
 		t.Fatalf("Open after crash: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestCrashRecoveryTmpFile(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create DB
-	db1, _ := Open(dir, "test.folio", Config{})
+	db1, _ := Open(filepath.Join(dir, "test.folio"), Config{})
 	db1.Set("doc", "content")
 	db1.Close()
 
@@ -145,7 +145,7 @@ func TestCrashRecoveryTmpFile(t *testing.T) {
 	os.WriteFile(tmpPath, []byte("garbage"), 0644)
 
 	// Reopen - should delete .tmp and repair
-	db2, err := Open(dir, "test.folio", Config{})
+	db2, err := Open(filepath.Join(dir, "test.folio"), Config{})
 	if err != nil {
 		t.Fatalf("Open with tmp file: %v", err)
 	}

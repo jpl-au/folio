@@ -1,6 +1,7 @@
 package folio
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -8,7 +9,7 @@ import (
 
 func BenchmarkSet(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
 	content := strings.Repeat("x", 1024) // 1KB
@@ -21,7 +22,7 @@ func BenchmarkSet(b *testing.B) {
 
 func BenchmarkSetSameKey(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
 	content := strings.Repeat("x", 1024)
@@ -34,7 +35,7 @@ func BenchmarkSetSameKey(b *testing.B) {
 
 func BenchmarkGetSparse(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
 	db.Set("doc", "content")
@@ -47,7 +48,7 @@ func BenchmarkGetSparse(b *testing.B) {
 
 func BenchmarkGetSorted(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
 	db.Set("doc", "content")
@@ -61,7 +62,7 @@ func BenchmarkGetSorted(b *testing.B) {
 
 func BenchmarkGetManyDocsSparse(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
 	for i := 0; i < 1000; i++ {
@@ -76,7 +77,7 @@ func BenchmarkGetManyDocsSparse(b *testing.B) {
 
 func BenchmarkGetManyDocsSorted(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
 	for i := 0; i < 1000; i++ {
@@ -92,7 +93,7 @@ func BenchmarkGetManyDocsSorted(b *testing.B) {
 
 func BenchmarkExists(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
 	db.Set("doc", "content")
@@ -105,7 +106,7 @@ func BenchmarkExists(b *testing.B) {
 
 func BenchmarkList(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
 	for i := 0; i < 100; i++ {
@@ -120,7 +121,7 @@ func BenchmarkList(b *testing.B) {
 
 func BenchmarkHistory(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
 	for i := 0; i < 10; i++ {
@@ -137,7 +138,7 @@ func BenchmarkCompact(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		dir := b.TempDir()
-		db, _ := Open(dir, "bench.folio", Config{})
+		db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 		for j := 0; j < 100; j++ {
 			db.Set("doc"+strconv.Itoa(j), "content")
 		}
@@ -196,7 +197,7 @@ func BenchmarkDecompress1KB(b *testing.B) {
 func benchSearchDB(b *testing.B) *DB {
 	b.Helper()
 	dir := b.TempDir()
-	db, err := Open(dir, "bench.folio", Config{})
+	db, err := Open(filepath.Join(dir, "bench.folio"), Config{})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -278,7 +279,7 @@ func BenchmarkUnescapeClean(b *testing.B) {
 func benchMissDB(b *testing.B, bloom bool) *DB {
 	b.Helper()
 	dir := b.TempDir()
-	db, err := Open(dir, "bench.folio", Config{BloomFilter: bloom})
+	db, err := Open(filepath.Join(dir, "bench.folio"), Config{BloomFilter: bloom})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -345,7 +346,7 @@ func BenchmarkBloomContains(b *testing.B) {
 func benchMixedDB(b *testing.B, bloom bool) *DB {
 	b.Helper()
 	dir := b.TempDir()
-	db, err := Open(dir, "bench.folio", Config{BloomFilter: bloom})
+	db, err := Open(filepath.Join(dir, "bench.folio"), Config{BloomFilter: bloom})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -445,7 +446,7 @@ func BenchmarkGetMixedWorkloadNoBloom(b *testing.B) {
 
 func BenchmarkOpenBloom(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	for i := 0; i < 1000; i++ {
 		db.Set("doc"+strconv.Itoa(i), "content")
 	}
@@ -453,14 +454,14 @@ func BenchmarkOpenBloom(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db, _ := Open(dir, "bench.folio", Config{BloomFilter: true})
+		db, _ := Open(filepath.Join(dir, "bench.folio"), Config{BloomFilter: true})
 		db.Close()
 	}
 }
 
 func BenchmarkOpenNoBloom(b *testing.B) {
 	dir := b.TempDir()
-	db, _ := Open(dir, "bench.folio", Config{})
+	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	for i := 0; i < 1000; i++ {
 		db.Set("doc"+strconv.Itoa(i), "content")
 	}
@@ -468,7 +469,7 @@ func BenchmarkOpenNoBloom(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db, _ := Open(dir, "bench.folio", Config{BloomFilter: false})
+		db, _ := Open(filepath.Join(dir, "bench.folio"), Config{BloomFilter: false})
 		db.Close()
 	}
 }
@@ -477,7 +478,7 @@ func BenchmarkRehash(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		dir := b.TempDir()
-		db, _ := Open(dir, "bench.folio", Config{})
+		db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 		for j := 0; j < 100; j++ {
 			db.Set("doc"+strconv.Itoa(j), "content")
 		}

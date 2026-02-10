@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 )
@@ -62,10 +63,13 @@ type DB struct {
 	mu     sync.RWMutex // in-process read/write coordination
 }
 
-// Open opens or creates a database. If a previous session crashed (dirty
-// flag set, or .tmp file left behind), an automatic Repair is attempted
-// under an exclusive lock to restore consistency before returning.
-func Open(dir, name string, config Config) (*DB, error) {
+// Open opens or creates a database at the given path. If a previous
+// session crashed (dirty flag set, or .tmp file left behind), an automatic
+// Repair is attempted under an exclusive lock to restore consistency
+// before returning.
+func Open(path string, config Config) (*DB, error) {
+	dir := filepath.Dir(path)
+	name := filepath.Base(path)
 	if config.HashAlgorithm == 0 {
 		config.HashAlgorithm = AlgXXHash3
 	}

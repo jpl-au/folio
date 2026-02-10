@@ -1,13 +1,14 @@
 package folio
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestConfigSyncWrites(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(dir, "test.folio", Config{SyncWrites: true})
+	db, err := Open(filepath.Join(dir, "test.folio"), Config{SyncWrites: true})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestConfigHashAlgorithm(t *testing.T) {
 
 	for _, tt := range tests {
 		dir := t.TempDir()
-		db, _ := Open(dir, "test.folio", Config{HashAlgorithm: tt.alg})
+		db, _ := Open(filepath.Join(dir, "test.folio"), Config{HashAlgorithm: tt.alg})
 
 		if db.config.HashAlgorithm != tt.want {
 			t.Errorf("HashAlgorithm(%d) = %d, want %d", tt.alg, db.config.HashAlgorithm, tt.want)
@@ -56,7 +57,7 @@ func TestConfigReadBufferDefault(t *testing.T) {
 
 func TestConfigReadBufferCustom(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, "test.folio", Config{ReadBuffer: 128 * 1024})
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{ReadBuffer: 128 * 1024})
 	defer db.Close()
 
 	if db.config.ReadBuffer != 128*1024 {
@@ -74,7 +75,7 @@ func TestConfigMaxRecordSizeDefault(t *testing.T) {
 
 func TestConfigMaxRecordSizeCustom(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, "test.folio", Config{MaxRecordSize: 8 * 1024 * 1024})
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{MaxRecordSize: 8 * 1024 * 1024})
 	defer db.Close()
 
 	if db.config.MaxRecordSize != 8*1024*1024 {
