@@ -136,6 +136,7 @@ Lookups for absent documents skip the linear scan entirely.
 
 ## Documentation
 
+- [AGENTS.md](AGENTS.md) - Quick orientation for LLM agents and tool integrations
 - [USAGE.md](USAGE.md) - Command-line usage and grep examples
 - [PORTING.md](PORTING.md) - Format specification and implementation guide
 
