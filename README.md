@@ -1,5 +1,7 @@
 # Folio
 
+*From the Latin folium — a leaf or page of a manuscript.*
+
 A JSONL document store where the file is the interface. One `.folio` file
 holds your data as plain text — readable by `grep`, `jq`, any JSONL-capable
 tool, or an LLM, without the engine running. The Go library adds binary
