@@ -61,6 +61,9 @@ func (db *DB) Set(label, content string) error {
 		if err != nil {
 			return fmt.Errorf("set: stat: %w", err)
 		}
+		// Reverse iterate: the sparse region is append-only, so the newest
+		// version is at the highest offset. Walking backwards finds the
+		// latest version first and breaks immediately.
 		results := sparse(db.reader, id, db.sparseStart(), sz, TypeIndex)
 		for i := len(results) - 1; i >= 0; i-- {
 			idx, err := decodeIndex(results[i].Data)

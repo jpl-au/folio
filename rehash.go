@@ -4,6 +4,17 @@
 // field sits at a fixed byte offset in every record. This means Rehash can
 // overwrite each _id in place without moving or resizing any records —
 // no temp file, no rewrite, just a linear scan with targeted byte patches.
+//
+// Crash safety: Rehash is NOT crash-safe. It patches IDs directly via
+// WriteAt without setting the dirty flag (which is managed by raw()).
+// If the process crashes mid-rehash, the file contains a mix of old and
+// new algorithm IDs while the header may still reference the old algorithm.
+// Binary search will silently produce wrong results. Recovery requires a
+// manual Repair call. This is acceptable because Rehash is a rare,
+// operator-initiated maintenance operation — not part of normal writes.
+// A future improvement could set the dirty flag before patching and
+// clear it after the header update, so crash recovery triggers
+// automatically.
 package folio
 
 import "fmt"

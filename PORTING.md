@@ -138,6 +138,13 @@ stored in the header (`_alg`) so all records in a file use the same one:
 
 The hash is formatted as `%016x` (16 hex digits, zero-padded, lowercase).
 
+xxHash3 is the default because it has the best throughput for short strings
+(document labels) and excellent distribution. FNV-1a is a stdlib-only
+fallback for environments that cannot use external dependencies. Blake2b
+offers cryptographic-quality distribution to minimise collision probability
+at the cost of ~10x slower hashing — relevant only for very large databases
+where birthday-bound collisions on 64-bit hashes become a concern.
+
 A port only needs to support one algorithm to read and write files. To
 interoperate with files created by other implementations, support all three.
 
@@ -181,6 +188,11 @@ Parameters used by the reference implementation:
 - Tuned for ~10k entries at ~1% false positive rate
 - Double hashing: `h1 = FNV-64a(id)`, `h2 = FNV-32a(id)`,
   `pos[i] = (h1 + i * h2) % bits`
+
+FNV is used for bloom hashing rather than the ID hash algorithm (xxHash3)
+to keep the hash functions independent. If the same algorithm generated
+both IDs and bloom positions, correlated collisions would produce
+correlated false positives, degrading the filter's effectiveness.
 
 The bloom filter is rebuilt from scratch at open and after each compaction
 (which empties the sparse region). It is purely a performance optimisation
@@ -264,10 +276,45 @@ machine and mutex are optimisations for concurrent in-process access.
 `Rehash(newAlgorithm)` migrates all record IDs to a different hash
 algorithm. Since IDs occupy a fixed position (bytes 16..31), this can
 overwrite them in place without rewriting the full record. After patching
-all records, the header's `_alg` field is updated.
+all IDs, the header's `_alg` field is updated and the file is fsynced.
 
-In practice this is implemented as a compaction that rehashes during the
-rebuild, since the section offsets may shift.
+A `Compact` should be run after `Rehash` to re-sort the heap and index
+sections by the new IDs, restoring binary search correctness.
+
+**Crash safety**: Rehash is not crash-safe. If the process dies mid-rehash,
+the file contains a mix of old and new algorithm IDs while the header may
+still reference the old algorithm. The dirty flag is not set during rehash
+(it is managed by the normal write path), so automatic crash recovery will
+not trigger. Recovery requires a manual `Repair` call. This is acceptable
+because rehash is a rare, operator-initiated maintenance operation. A port
+should document this limitation or implement its own crash guard (e.g. set
+the dirty flag before patching, clear after the header update).
+
+## Search
+
+Search scans data records (`idx=2`) and matches the pattern against the
+`_d` field. The scan is streaming: records are read line-by-line with a
+bounded buffer, and the `_d` content is extracted by byte-scanning for
+field delimiters rather than JSON-parsing each line. Memory stays
+proportional to the buffer size, not the largest record.
+
+The reference implementation uses two match strategies:
+
+- **Literal fast path**: when the pattern contains no regex metacharacters,
+  it is JSON-escaped (via `json.Marshal`, stripping surrounding quotes) and
+  matched against the raw `_d` bytes with `bytes.Contains`. This avoids
+  both regex overhead and per-record JSON unescaping. The JSON-escaped
+  needle matches the on-disk encoding directly.
+
+- **Regex fallback**: patterns with metacharacters are compiled to a regex
+  and matched per record. An optional `Decode` flag unescapes JSON string
+  escapes in `_d` before matching, handling non-standard encodings like
+  `\u0041` for `A`. When `Decode` is set, the literal fast path is
+  bypassed to guarantee equivalent results.
+
+A port may use either strategy or a simpler approach (e.g. parse JSON,
+extract `_d`, match). The literal fast path is an optimisation, not a
+format requirement.
 
 ## Constraints
 

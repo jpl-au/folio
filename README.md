@@ -103,10 +103,17 @@ db.List() ([]string, error)                  // All labels
 ### Search and History
 
 ```go
-db.Search(pattern string, opts SearchOptions) ([]Match, error)   // Regex on content
+db.Search(pattern string, opts SearchOptions) ([]Match, error)   // Pattern match on content
 db.MatchLabel(pattern string) ([]Match, error)                   // Regex on labels
 db.History(label string) ([]Version, error)                      // All versions
 ```
+
+Search uses a literal fast path for patterns without regex metacharacters:
+the query is JSON-escaped and matched with `bytes.Contains` against the raw
+file content, avoiding both regex overhead and per-record JSON unescaping.
+Patterns containing regex metacharacters (`.*+?()[]{}|\^$`) fall back to
+`regexp.Match`. The fast path is transparent — callers don't need to know
+which path runs.
 
 ### Maintenance
 

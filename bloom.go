@@ -49,6 +49,12 @@ func (b *bloom) Reset() {
 
 // positions derives BloomK bit indices using double hashing: h(i) = h1 + i*h2.
 // Two independent hashes (FNV-64a, FNV-32a) simulate k independent functions.
+//
+// FNV is used here (not xxHash3, which is already a dependency) because the
+// bloom filter needs hash functions independent from the ID hash. If the
+// same algorithm generated both IDs and bloom positions, correlated
+// collisions would produce correlated false positives, degrading the
+// filter's effectiveness. FNV provides that independence and is stdlib-only.
 func positions(id string) [BloomK]uint {
 	h64 := fnv.New64a()
 	h64.Write([]byte(id))

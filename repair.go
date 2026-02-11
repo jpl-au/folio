@@ -7,6 +7,13 @@
 // search. It also serves as crash recovery: on Open, if a .tmp file or
 // dirty flag is found, Repair is run automatically to restore consistency.
 //
+// A temporary file (.tmp) is used instead of rewriting in place because
+// in-place rewrite risks total data loss on crash: if the process dies
+// mid-rewrite, both the old and new data are gone. Writing to a temp
+// file, syncing, then atomically renaming means the original file is
+// intact until the rename succeeds. A crash during the write phase at
+// worst orphans the .tmp file, which is cleaned up on next Open.
+//
 // The operation proceeds in two phases to minimise the time readers are
 // blocked:
 //

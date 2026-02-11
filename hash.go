@@ -5,6 +5,15 @@
 // The algorithm is stored in the header so all records in a file use the
 // same one; Rehash can migrate between algorithms in place because the
 // output width is identical across all three.
+//
+// xxHash3 is the default because it has the best throughput for short
+// strings (document labels) and excellent distribution. FNV-1a exists
+// as a stdlib-only fallback for environments that cannot use cgo or
+// external dependencies. Blake2b is offered for users who want
+// cryptographic-quality distribution to minimise collision probability,
+// at the cost of ~10x slower hashing — relevant only for very large
+// databases where birthday-bound collisions on 64-bit hashes become
+// a concern.
 package folio
 
 import (

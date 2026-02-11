@@ -188,10 +188,82 @@ func TestSearchDecodeQuotes(t *testing.T) {
 		t.Error("decoded search should match quoted content")
 	}
 
-	// Without Decode, the raw JSON has escaped quotes (\"), not literal quotes.
+	// Without Decode, the literal fast path JSON-escapes the query
+	// so it matches the raw \" sequences directly.
 	matches, _ = db.Search(`"world"`, SearchOptions{})
+	if len(matches) == 0 {
+		t.Error("literal search should match quoted content via escaped query")
+	}
+}
+
+func TestSearchRegexDecodeQuotes(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", `hello "world"`)
+
+	// Regex path (pattern has metacharacter) without Decode cannot match
+	// literal quotes because the raw JSON has escaped quotes (\").
+	matches, _ := db.Search(`"wor.d"`, SearchOptions{})
 	if len(matches) != 0 {
-		t.Error("raw search should not match literal quotes in JSON-encoded content")
+		t.Error("regex on raw JSON should not match literal quotes")
+	}
+
+	// With Decode, the unescaped content is matched.
+	matches, _ = db.Search(`"wor.d"`, SearchOptions{Decode: true})
+	if len(matches) == 0 {
+		t.Error("regex with decode should match quoted content")
+	}
+}
+
+func TestSearchLiteralNewline(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", "line1\nline2")
+
+	// Literal path: the newline in the pattern is JSON-escaped to \n
+	// and matched against the raw JSON bytes without unescaping content.
+	matches, err := db.Search("line1\nline2", SearchOptions{})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Error("literal search should match content with newlines")
+	}
+}
+
+func TestSearchBothPathsNewline(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", "line1\nline2")
+
+	// Literal path: "line1" has no metacharacters.
+	matches, _ := db.Search("line1", SearchOptions{})
+	if len(matches) == 0 {
+		t.Error("literal path should match substring in newline content")
+	}
+
+	// Regex path: "line." has a metacharacter.
+	matches, _ = db.Search("line.", SearchOptions{})
+	if len(matches) == 0 {
+		t.Error("regex path should match pattern in newline content")
+	}
+}
+
+func TestSearchBothPathsQuotes(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", `say "hello" please`)
+
+	// Literal path: `"hello"` has no regex metacharacters (quote is not one).
+	matches, _ := db.Search(`"hello"`, SearchOptions{})
+	if len(matches) == 0 {
+		t.Error("literal path should match quoted substring")
+	}
+
+	// Regex path: `"hel.o"` has a metacharacter.
+	matches, _ = db.Search(`"hel.o"`, SearchOptions{Decode: true})
+	if len(matches) == 0 {
+		t.Error("regex path with decode should match quoted content")
 	}
 }
 

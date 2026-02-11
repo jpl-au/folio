@@ -40,6 +40,7 @@ func (db *DB) Delete(label string) error {
 	if err != nil {
 		return fmt.Errorf("delete: stat: %w", err)
 	}
+	// Reverse iterate: newest version is at the highest offset (see set.go).
 	results := sparse(db.reader, id, db.sparseStart(), sz, TypeIndex)
 	for i := len(results) - 1; i >= 0; i-- {
 		result := results[i]

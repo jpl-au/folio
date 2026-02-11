@@ -45,13 +45,15 @@ type Config struct {
 	BloomFilter   bool // maintain bloom filter over the sparse region
 }
 
-// DB is an open database handle. Two separate file descriptors are held:
-// reader (O_RDONLY) for concurrent reads and writer (O_RDWR) for appends
-// and in-place patches. The OS file lock is taken on the writer fd.
+// DB is an open database handle. Two separate file descriptors are held
+// so that concurrent reads never contend with writes. ReadAt on the
+// O_RDONLY fd is position-independent and safe for concurrent readers;
+// a single O_RDWR fd would have reads and appends fighting over the
+// shared file position. Splitting eliminates that contention entirely.
 type DB struct {
 	root   *os.Root
 	name   string
-	reader *os.File  // read-only fd, shared by concurrent readers
+	reader *os.File  // read-only fd, shared by concurrent readers (ReadAt is position-independent)
 	writer *os.File  // read-write fd, used for appends and patches
 	lock   *fileLock // OS-level flock on the writer fd (see lock.go)
 	header *Header   // cached, rewritten on Repair/Rehash
@@ -59,8 +61,12 @@ type DB struct {
 	bloom  *bloom // nil unless Config.BloomFilter is set
 	tail   int64  // next append position (current end of file)
 	state  atomic.Int32
-	cond   *sync.Cond   // waiters blocked by state transitions
-	mu     sync.RWMutex // in-process read/write coordination
+	// cond uses its own mutex, not db.mu, because sync.Cond requires a
+	// plain Locker (Lock/Unlock). Using db.mu.Lock() would block all
+	// readers during state waits. The separate mutex ensures state
+	// transitions don't hold the RWMutex.
+	cond *sync.Cond
+	mu   sync.RWMutex // in-process read/write coordination
 }
 
 // Open opens or creates a database at the given path. If a previous
