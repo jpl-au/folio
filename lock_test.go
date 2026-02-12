@@ -1,3 +1,16 @@
+// File-level lock tests.
+//
+// Folio uses OS-level file locking (flock) to prevent multiple
+// processes from writing to the same database file simultaneously.
+// Without file locking, two processes running Set concurrently would
+// interleave their writes, corrupting the JSONL format. The in-process
+// state machine (sync.Cond) handles concurrency within a single
+// process; file locking handles cross-process concurrency.
+//
+// These tests open the same database file twice (simulating two
+// processes) and verify that an exclusive lock blocks a second
+// exclusive lock, and that a shared lock blocks an exclusive lock.
+// The 100ms timeout detects blocking without causing the test to hang.
 package folio
 
 import (
@@ -6,6 +19,10 @@ import (
 	"time"
 )
 
+// TestLocking verifies that an exclusive lock blocks a second exclusive
+// lock. This is the write-write exclusion case: if two processes could
+// both hold exclusive locks, their concurrent writes would interleave
+// and corrupt the file.
 func TestLocking(t *testing.T) {
 	tmp := t.TempDir()
 
@@ -72,6 +89,11 @@ func TestLocking(t *testing.T) {
 	}
 }
 
+// TestReadWriteLocking verifies that a shared (read) lock blocks an
+// exclusive (write) lock. This is the read-write exclusion case:
+// a reading process must not see a file in the middle of a write
+// operation. If a writer could proceed while a reader held a shared
+// lock, the reader might read a partially-written record.
 func TestReadWriteLocking(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := Config{HashAlgorithm: AlgXXHash3}

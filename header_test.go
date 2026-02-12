@@ -1,3 +1,17 @@
+// Header serialisation and validation tests.
+//
+// The header is a fixed 128-byte JSON line at byte 0 of every folio file.
+// It stores the hash algorithm, section boundaries (Heap, Index), and a
+// dirty flag (Error) used for crash recovery. Every read operation depends
+// on correct header values to find the sorted and sparse regions — a wrong
+// Heap offset would cause binary search to read data records as indexes,
+// returning garbage offsets to Get.
+//
+// These tests verify: encoding produces exactly 128 bytes, round-trip
+// encode/decode preserves all fields, the dirty flag occupies the expected
+// byte position (so writeAt can flip it without re-encoding the full
+// header), and invalid headers are rejected before any data operations
+// begin.
 package folio
 
 import (
@@ -6,12 +20,20 @@ import (
 	"testing"
 )
 
+// TestHeaderSize guards the constant that every other offset calculation
+// depends on. If HeaderSize drifted from 128, the first data record would
+// be written at the wrong position and every subsequent seek would be off.
 func TestHeaderSize(t *testing.T) {
 	if HeaderSize != 128 {
 		t.Errorf("HeaderSize = %d, want 128", HeaderSize)
 	}
 }
 
+// TestHeaderEncode verifies that encode() produces exactly HeaderSize
+// bytes terminated by a newline. The newline is critical: line() reads
+// until '\n', so a header without a trailing newline would cause the
+// first data read to consume the header plus the first record as one
+// oversized line, failing JSON parsing.
 func TestHeaderEncode(t *testing.T) {
 	h := &Header{
 		Error:     0,
@@ -35,6 +57,11 @@ func TestHeaderEncode(t *testing.T) {
 	}
 }
 
+// TestHeaderEncodeFreshDB verifies encoding when Heap and Index are zero
+// (no compaction has occurred). The JSON must still pad to exactly 128
+// bytes — if the padding logic assumed non-zero section offsets, a fresh
+// database would have a short header and every subsequent write would
+// land at the wrong file position.
 func TestHeaderEncodeFreshDB(t *testing.T) {
 	h := &Header{
 		Error:     0,
@@ -54,6 +81,11 @@ func TestHeaderEncodeFreshDB(t *testing.T) {
 	}
 }
 
+// TestHeaderReadWrite is the round-trip test: encode a header with known
+// field values, write it to a file, read it back with header(), and
+// verify every field matches. This catches encoding bugs (e.g. a field
+// mapped to the wrong JSON key) that would silently produce a valid
+// header with swapped section boundaries.
 func TestHeaderReadWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.folio")
@@ -105,6 +137,12 @@ func TestHeaderReadWrite(t *testing.T) {
 	}
 }
 
+// TestHeaderDirtyFlag exercises the crash-recovery mechanism. Before any
+// write, the dirty flag (Error field) is set to 1; after a clean Close
+// or Compact, it is cleared to 0. On Open, a dirty flag of 1 means the
+// previous session crashed mid-write, triggering automatic Repair. If
+// dirty() failed to persist the flag, a crash after a write would leave
+// the file in an inconsistent state with no recovery on next Open.
 func TestHeaderDirtyFlag(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.folio")
@@ -147,6 +185,13 @@ func TestHeaderDirtyFlag(t *testing.T) {
 	}
 }
 
+// TestHeaderDirtyPosition verifies that the dirty flag lives at byte
+// offset 13 in the file. The dirty() function uses writeAt to flip a
+// single byte ('0'→'1') rather than re-encoding the full 128-byte
+// header — this is an intentional optimisation because dirty() is called
+// on every write. If the byte position drifted (e.g. due to a new JSON
+// field being added before _e), dirty() would overwrite an unrelated
+// field and the flag would never be detected on recovery.
 func TestHeaderDirtyPosition(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.folio")
@@ -179,6 +224,101 @@ func TestHeaderDirtyPosition(t *testing.T) {
 	}
 }
 
+// TestHeaderCorruptHeapTooSmall verifies that header() rejects a Heap
+// offset smaller than HeaderSize. A Heap value of 50 would place data
+// records inside the header region, so binary search would read header
+// JSON as a record and return nonsense. The validation in header()
+// catches this on Open before any data operations begin.
+func TestHeaderCorruptHeapTooSmall(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.folio")
+
+	h := &Header{Version: 2, Algorithm: AlgXXHash3, Heap: 50}
+	buf, _ := h.encode()
+	os.WriteFile(path, buf, 0644)
+
+	f, _ := os.Open(path)
+	defer f.Close()
+
+	_, err := header(f)
+	if err != ErrCorruptHeader {
+		t.Errorf("expected ErrCorruptHeader, got %v", err)
+	}
+}
+
+// TestHeaderCorruptIndexTooSmall verifies that header() rejects an Index
+// offset smaller than HeaderSize. The index section must start after
+// the header; a value of 50 would overlap the header, causing the
+// sorted-index binary search to read header bytes as index JSON.
+func TestHeaderCorruptIndexTooSmall(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.folio")
+
+	h := &Header{Version: 2, Algorithm: AlgXXHash3, Index: 50}
+	buf, _ := h.encode()
+	os.WriteFile(path, buf, 0644)
+
+	f, _ := os.Open(path)
+	defer f.Close()
+
+	_, err := header(f)
+	if err != ErrCorruptHeader {
+		t.Errorf("expected ErrCorruptHeader, got %v", err)
+	}
+}
+
+// TestHeaderCorruptHeapAfterIndex verifies that header() rejects a file
+// where Heap > Index. The layout invariant is [Header][Heap][Index][Sparse]:
+// Heap must end before Index begins. If this were inverted, the binary
+// search boundaries would be wrong and Get would scan data records as
+// indexes, returning byte offsets from document content fields.
+func TestHeaderCorruptHeapAfterIndex(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.folio")
+
+	h := &Header{Version: 2, Algorithm: AlgXXHash3, Heap: 5000, Index: 4000}
+	buf, _ := h.encode()
+	os.WriteFile(path, buf, 0644)
+
+	f, _ := os.Open(path)
+	defer f.Close()
+
+	_, err := header(f)
+	if err != ErrCorruptHeader {
+		t.Errorf("expected ErrCorruptHeader, got %v", err)
+	}
+}
+
+// TestHeaderCorruptJSON verifies that header() returns ErrCorruptHeader
+// when the first 128 bytes are not valid JSON. This is the very first
+// check Open performs — if it accepted garbage, every subsequent read
+// would use uninitialised section boundaries (all zero), causing binary
+// search to operate on an empty range and sparse scan to start from
+// byte 0, reading the header as a data record.
+func TestHeaderCorruptJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.folio")
+
+	buf := make([]byte, HeaderSize)
+	copy(buf, []byte("not json at all"))
+	buf[HeaderSize-1] = '\n'
+	os.WriteFile(path, buf, 0644)
+
+	f, _ := os.Open(path)
+	defer f.Close()
+
+	_, err := header(f)
+	if err != ErrCorruptHeader {
+		t.Errorf("expected ErrCorruptHeader, got %v", err)
+	}
+}
+
+// TestHeaderAllAlgorithms verifies that every supported hash algorithm
+// survives a header round-trip. The algorithm field controls which hash
+// function is used for ID generation and index lookups — if encoding
+// lost the algorithm value, a reopened database would use the default
+// (xxHash3) regardless of what was configured, producing different IDs
+// for the same labels and making all existing documents unfindable.
 func TestHeaderAllAlgorithms(t *testing.T) {
 	for _, alg := range []int{AlgXXHash3, AlgFNV1a, AlgBlake2b} {
 		h := &Header{

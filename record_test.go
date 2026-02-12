@@ -1,3 +1,18 @@
+// Record type and parsing primitive tests.
+//
+// Records are the fundamental unit of storage in a folio file. Every
+// line after the 128-byte header is one of three types: Index (type 1,
+// carries a byte offset to the data), Record (type 2, carries the
+// document content), or History (type 3, carries compressed past
+// versions). The type byte lives at a fixed position (byte 7) so that
+// scan functions can identify it without JSON parsing.
+//
+// These tests verify the type constants that are persisted on disk, the
+// decode/decodeIndex parsers that turn raw bytes into structs, the
+// valid() pre-check that filters out blanked records, the label()
+// extractor that avoids full JSON parsing in hot paths, the unescape()
+// function that handles JSON string escape sequences, and the now()
+// timestamp generator that provides ordering for versions.
 package folio
 
 import (
@@ -5,6 +20,10 @@ import (
 	"time"
 )
 
+// TestRecordTypeConstants guards the numeric values stored in every
+// record's "idx" field. These values are persisted on disk — if
+// TypeRecord changed from 2 to something else, existing databases
+// would misidentify every data record.
 func TestRecordTypeConstants(t *testing.T) {
 	if TypeIndex != 1 {
 		t.Errorf("TypeIndex = %d, want 1", TypeIndex)
@@ -17,18 +36,34 @@ func TestRecordTypeConstants(t *testing.T) {
 	}
 }
 
+// TestMaxLabelSize guards the label length limit. Labels are stored
+// inline in the JSON record; an excessively long label would push the
+// record past the line length that line() can buffer, causing read
+// failures. The constant is persisted implicitly (existing records
+// respect it), so changing it would make old records with long labels
+// unreadable.
 func TestMaxLabelSize(t *testing.T) {
 	if MaxLabelSize != 256 {
 		t.Errorf("MaxLabelSize = %d, want 256", MaxLabelSize)
 	}
 }
 
+// TestMinRecordSize guards the minimum line length used by scanm to
+// skip short/corrupt lines. A valid record must be at least 53 bytes
+// (the fixed-position fields: type, ID, timestamp). If this constant
+// drifted, scanm would either skip valid short records or attempt to
+// extract fields from lines too short to contain them, causing an
+// index-out-of-bounds panic.
 func TestMinRecordSize(t *testing.T) {
 	if MinRecordSize != 53 {
 		t.Errorf("MinRecordSize = %d, want 53", MinRecordSize)
 	}
 }
 
+// TestDecodeIndexRecord verifies that decode() correctly parses a type-1
+// (Index) record. decode() is used by sparse() which needs to match IDs
+// and labels; if the Type field were parsed incorrectly, sparse would
+// misidentify indexes as data records and skip them.
 func TestDecodeIndexRecord(t *testing.T) {
 	data := []byte(`{"idx":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":5000,"_l":"my app"}`)
 
@@ -45,6 +80,11 @@ func TestDecodeIndexRecord(t *testing.T) {
 	}
 }
 
+// TestDecodeDataRecord verifies that decode() correctly parses a type-2
+// (Record) line including the Data and History fields. These fields
+// carry the actual document content and compressed version history —
+// if they were swapped or truncated, Get would return history data as
+// content or History would fail to decompress.
 func TestDecodeDataRecord(t *testing.T) {
 	data := []byte(`{"idx":2,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my app","_d":"content","_h":"compressed"}`)
 
@@ -64,6 +104,11 @@ func TestDecodeDataRecord(t *testing.T) {
 	}
 }
 
+// TestDecodeHistoryRecord verifies that decode() correctly parses a
+// type-3 (History) record. History records are written during
+// compaction and have an empty Data field but a non-empty History
+// field. If decode() treated empty Data as an error, compacted
+// databases would fail to load their version history.
 func TestDecodeHistoryRecord(t *testing.T) {
 	data := []byte(`{"idx":3,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my app","_d":"","_h":"compressed"}`)
 
@@ -83,6 +128,11 @@ func TestDecodeHistoryRecord(t *testing.T) {
 	}
 }
 
+// TestDecodeIndexRecordWithDecodeIndex verifies that decodeIndex()
+// extracts the Offset field that Get uses to seek to the data record.
+// decode() maps into a Record struct (no Offset field); decodeIndex()
+// maps into an Index struct (with Offset). If decodeIndex failed to
+// parse _o, Get would seek to offset 0 and read the header as content.
 func TestDecodeIndexRecordWithDecodeIndex(t *testing.T) {
 	data := []byte(`{"idx":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":5000,"_l":"my app"}`)
 
@@ -99,6 +149,10 @@ func TestDecodeIndexRecordWithDecodeIndex(t *testing.T) {
 	}
 }
 
+// TestDecodeInvalidJSON verifies that decode() returns ErrCorruptRecord
+// for invalid JSON rather than a zero-value Record. A zero-value would
+// have Type=0, which doesn't match any valid type — but callers might
+// not check for that, leading to silent misclassification.
 func TestDecodeInvalidJSON(t *testing.T) {
 	_, err := decode([]byte(`{invalid`))
 	if err != ErrCorruptRecord {
@@ -106,6 +160,9 @@ func TestDecodeInvalidJSON(t *testing.T) {
 	}
 }
 
+// TestDecodeEmpty verifies that decode() returns ErrCorruptRecord for
+// empty input. Empty bytes can appear when line() reads past the end
+// of the file or encounters a zero-length line between two newlines.
 func TestDecodeEmpty(t *testing.T) {
 	_, err := decode([]byte{})
 	if err != ErrCorruptRecord {
@@ -113,6 +170,12 @@ func TestDecodeEmpty(t *testing.T) {
 	}
 }
 
+// TestValid exercises the fast pre-check that scan functions use to
+// skip blanked records without parsing JSON. Only lines starting with
+// '{' are candidates. Blanked records start with spaces (from writeAt
+// during delete/update). Getting this wrong would cause scan to attempt
+// JSON parsing on every blanked record, turning O(log n) binary search
+// into O(n) with parse errors.
 func TestValid(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -135,6 +198,11 @@ func TestValid(t *testing.T) {
 	}
 }
 
+// TestLabel exercises the byte-scanning label extractor that avoids a
+// full JSON parse in hot paths (compaction, search). It must handle
+// all three record types, special characters in labels, and empty
+// labels. Returning the wrong label would cause compaction to group
+// records under the wrong document, mixing unrelated version histories.
 func TestLabel(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -158,6 +226,11 @@ func TestLabel(t *testing.T) {
 	}
 }
 
+// TestNow verifies that now() returns a millisecond timestamp within
+// the current wall-clock window. The timestamp is stored in every
+// record's _ts field and used to order versions within a document.
+// If now() returned seconds instead of milliseconds, two rapid writes
+// would get the same timestamp and their ordering would be ambiguous.
 func TestNow(t *testing.T) {
 	before := time.Now().UnixMilli()
 	result := now()
@@ -168,6 +241,11 @@ func TestNow(t *testing.T) {
 	}
 }
 
+// TestNowIncreases verifies that successive calls to now() produce
+// non-decreasing values. Version ordering in History depends on
+// timestamps increasing monotonically. If now() could go backwards
+// (e.g. due to a time zone bug), History would return versions in
+// the wrong order.
 func TestNowIncreases(t *testing.T) {
 	t1 := now()
 	time.Sleep(time.Millisecond)
@@ -178,6 +256,12 @@ func TestNowIncreases(t *testing.T) {
 	}
 }
 
+// TestUnescape exercises the JSON string unescaper used by the label()
+// fast path and Search content matching. JSON strings can contain
+// escape sequences like \" \\ \n \uXXXX — if unescape() missed any of
+// these, labels or content containing special characters would fail to
+// match, making affected documents invisible to Search and causing
+// label mismatches during compaction.
 func TestUnescape(t *testing.T) {
 	tests := []struct {
 		name string

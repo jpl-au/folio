@@ -1,3 +1,20 @@
+// Concurrency safety tests for the DB state machine.
+//
+// Folio uses a sync.Cond-based state machine (StateAll, StateRead, StateNone,
+// StateClosed) to coordinate concurrent access to a single file. Every public
+// method calls blockRead or blockWrite, which wait on the condition variable
+// until the state permits the operation. These tests verify three properties
+// that are difficult to prove by inspection alone:
+//
+//  1. Readers never see torn writes (partially-written JSONL lines).
+//  2. Close wakes all waiting goroutines so they return ErrClosed rather than
+//     hanging forever.
+//  3. Compaction (which transitions to StateRead, blocking writers) does not
+//     starve concurrent readers.
+//
+// All tests use the -race detector implicitly via `go test -race`, which
+// catches data races on the shared file handles and header fields that would
+// otherwise manifest as intermittent corruption in production.
 package folio
 
 import (
@@ -5,6 +22,12 @@ import (
 	"testing"
 )
 
+// TestConcurrentReads verifies that multiple goroutines can call Get
+// simultaneously without data races or returning incorrect content.
+// blockRead acquires a read-compatible state via sync.Cond — if the
+// condition check were wrong (e.g. using Lock instead of Wait), all
+// readers would serialise and throughput would collapse, or worse,
+// a reader could proceed during a write and see a partial line.
 func TestConcurrentReads(t *testing.T) {
 	db := openTestDB(t)
 
@@ -31,6 +54,11 @@ func TestConcurrentReads(t *testing.T) {
 	wg.Wait()
 }
 
+// TestConcurrentWrites verifies that concurrent Set calls do not corrupt
+// the file. Each Set appends a record+index pair and updates the tail
+// offset; if two goroutines interleaved their appends without the write
+// lock, the second append would start at a stale tail offset and
+// overwrite the first record's bytes, producing invalid JSONL.
 func TestConcurrentWrites(t *testing.T) {
 	db := openTestDB(t)
 
@@ -54,6 +82,11 @@ func TestConcurrentWrites(t *testing.T) {
 	}
 }
 
+// TestConcurrentReadWrite exercises the most common production pattern:
+// readers and writers operating simultaneously. The state machine must
+// allow both when in StateAll. A subtle bug here — such as a writer
+// transitioning to StateRead before completing — would cause readers to
+// see a half-written line or writers to block indefinitely.
 func TestConcurrentReadWrite(t *testing.T) {
 	db := openTestDB(t)
 
@@ -90,6 +123,12 @@ func TestConcurrentReadWrite(t *testing.T) {
 	wg.Wait()
 }
 
+// TestCloseWakesWaiters verifies that Close broadcasts to all goroutines
+// blocked in blockRead. The state machine uses sync.Cond.Wait, which
+// suspends the goroutine until Broadcast is called. If Close only called
+// Signal (waking one waiter) instead of Broadcast, the remaining
+// goroutines would hang forever — a goroutine leak that would prevent
+// the process from exiting cleanly.
 func TestCloseWakesWaiters(t *testing.T) {
 	db := openTestDB(t)
 	db.Set("doc", "content")
@@ -125,6 +164,11 @@ func TestCloseWakesWaiters(t *testing.T) {
 	}
 }
 
+// TestConcurrentList exercises List under contention. List performs a
+// full linear scan of the sparse region and a binary search of the
+// sorted region, reading many lines per call. If the reader file handle
+// were not safe for concurrent use (e.g. if ReadAt mutated shared
+// state), overlapping List calls would return corrupted label sets.
 func TestConcurrentList(t *testing.T) {
 	db := openTestDB(t)
 
@@ -153,6 +197,47 @@ func TestConcurrentList(t *testing.T) {
 	wg.Wait()
 }
 
+// TestCloseWakesWriteWaiters is the write-side counterpart to
+// TestCloseWakesWaiters. Writers blocked in blockWrite must also be
+// woken by Close. If they weren't, a program that calls Close while
+// a background writer is pending would deadlock — the writer waits
+// for StateAll, but Close has already moved the state to StateClosed.
+func TestCloseWakesWriteWaiters(t *testing.T) {
+	db := openTestDB(t)
+	db.Set("doc", "content")
+
+	db.state.Store(StateNone)
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, 5)
+
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errChan <- db.Set("doc", "updated")
+		}()
+	}
+
+	go func() { db.Close() }()
+
+	wg.Wait()
+	close(errChan)
+
+	for err := range errChan {
+		if err != ErrClosed {
+			t.Errorf("Set during close: got %v, want ErrClosed", err)
+		}
+	}
+}
+
+// TestConcurrentCompactRead verifies that readers continue to succeed
+// while compaction is in progress. Compact transitions the state to
+// StateRead (blocking writers but allowing readers), rebuilds the file,
+// then restores StateAll. If the state transition were wrong — e.g.
+// moving to StateNone instead of StateRead — all concurrent Get calls
+// would block until compaction finishes, creating a latency spike
+// proportional to the database size.
 func TestConcurrentCompactRead(t *testing.T) {
 	db := openTestDB(t)
 

@@ -1,3 +1,14 @@
+// On-disk format verification tests.
+//
+// Folio's file format has strict layout requirements that every read
+// function depends on: the header is exactly 128 bytes, record types
+// are at byte 7, IDs are at bytes 16–31, timestamps are at bytes 40–52,
+// and section boundaries (Heap, Index) define where binary search
+// operates. These tests read raw bytes from the file and verify the
+// format matches expectations. They serve as a contract between the
+// write path (which produces the layout) and the read path (which
+// assumes it) — if either side changes, these tests catch the mismatch
+// before it becomes a runtime bug.
 package folio
 
 import (
@@ -7,6 +18,7 @@ import (
 	"testing"
 )
 
+// dbsize is a test helper that returns the database file size.
 func dbsize(t *testing.T, db *DB) int64 {
 	t.Helper()
 	s, err := size(db.reader)
@@ -16,6 +28,10 @@ func dbsize(t *testing.T, db *DB) int64 {
 	return s
 }
 
+// TestConstants guards every exported constant that is persisted on disk
+// or used in byte-position calculations. If any value changed, existing
+// databases would become unreadable because the read path extracts
+// fields at hardcoded offsets derived from these constants.
 func TestConstants(t *testing.T) {
 	tests := []struct {
 		name string
@@ -45,6 +61,12 @@ func TestConstants(t *testing.T) {
 	}
 }
 
+// TestHeaderFormat reads the raw bytes of a freshly-created database
+// file and verifies: the file is at least 128 bytes, the header ends
+// with a newline, and the header is valid JSON. If the header format
+// changed (e.g. a different JSON library that omits the trailing pad),
+// this test catches it before any read operation fails with a cryptic
+// parse error.
 func TestHeaderFormat(t *testing.T) {
 	dir := t.TempDir()
 	db, _ := Open(filepath.Join(dir, "test.folio"), Config{})
@@ -72,6 +94,11 @@ func TestHeaderFormat(t *testing.T) {
 	}
 }
 
+// TestRecordFormat verifies that the first record after the header
+// starts with {"idx": and has a valid type byte at position 7. This is
+// the most basic format contract — if the JSON library changed field
+// ordering, every fixed-position extraction in scan, scanm, and binary
+// search would read the wrong bytes.
 func TestRecordFormat(t *testing.T) {
 	db := openTestDB(t)
 
@@ -112,6 +139,10 @@ func TestRecordFormat(t *testing.T) {
 	}
 }
 
+// TestIndexRecordFormat verifies the structure of a type-1 (Index)
+// record: 16-char hex ID, correct label, and an Offset >= HeaderSize.
+// The Offset is the critical field — it tells Get where to seek for
+// the data record. An Offset < HeaderSize would read inside the header.
 func TestIndexRecordFormat(t *testing.T) {
 	db := openTestDB(t)
 
@@ -143,6 +174,11 @@ func TestIndexRecordFormat(t *testing.T) {
 	}
 }
 
+// TestDataRecordFormat verifies the structure of a type-2 (Record)
+// record: correct type, 16-char ID, matching label, content in _d,
+// and a non-empty _h field. The _h field is populated even for a single
+// version (it stores a compressed empty history) — if it were missing,
+// History would fail to decompress it.
 func TestDataRecordFormat(t *testing.T) {
 	db := openTestDB(t)
 
@@ -175,6 +211,11 @@ func TestDataRecordFormat(t *testing.T) {
 	}
 }
 
+// TestHistoryRecordFormat verifies the structure of a type-3 (History)
+// record. When a document is updated, the old version becomes a History
+// record with a blanked _d field (spaces) and the compressed version
+// chain in _h. If the _d field weren't blanked, Search would match
+// stale content from old versions.
 func TestHistoryRecordFormat(t *testing.T) {
 	db := openTestDB(t)
 
@@ -253,6 +294,12 @@ func mustMarshal(t *testing.T, v any) []byte {
 	return b
 }
 
+// TestSectionBoundaries verifies the section layout invariants before
+// and after compaction. A fresh database has no sorted sections (all
+// zero), and sparse starts at HeaderSize. After compaction, the heap
+// and index sections exist, indexStart < indexEnd, and sparse starts
+// at indexEnd. If any boundary were wrong, binary search would operate
+// on the wrong byte range.
 func TestSectionBoundaries(t *testing.T) {
 	db := openTestDB(t)
 
@@ -285,6 +332,11 @@ func TestSectionBoundaries(t *testing.T) {
 	}
 }
 
+// TestIDAtFixedPosition verifies that the ID extracted by byte-position
+// (bytes 16–31) matches the ID from full JSON parsing. Binary search
+// uses the byte-position extraction for speed; if the positions drifted
+// from the JSON layout, binary search would compare garbage bytes and
+// miss every document.
 func TestIDAtFixedPosition(t *testing.T) {
 	db := openTestDB(t)
 
@@ -309,6 +361,11 @@ func TestIDAtFixedPosition(t *testing.T) {
 	}
 }
 
+// TestTimestampAtFixedPosition verifies that bytes 40–52 contain a
+// numeric timestamp. scanm uses this range to extract timestamps
+// without JSON parsing during compaction. If the timestamp moved to
+// a different position, compaction would sort records by garbage values,
+// producing a heap with wrong version ordering.
 func TestTimestampAtFixedPosition(t *testing.T) {
 	db := openTestDB(t)
 

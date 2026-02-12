@@ -1,3 +1,11 @@
+// Configuration option tests.
+//
+// Config controls runtime behaviour: hash algorithm, sync writes,
+// read buffer size, max record size, and bloom filter. The defaults
+// are chosen for the common case (fast, no fsync, 64KB buffer, 16MB
+// max). These tests verify that: defaults are applied when Config{}
+// is passed, custom values override defaults, and the database remains
+// fully functional with each configuration variant.
 package folio
 
 import (
@@ -6,6 +14,10 @@ import (
 	"testing"
 )
 
+// TestConfigSyncWrites verifies that SyncWrites=true is propagated to
+// the database and that operations still succeed. SyncWrites adds
+// fsync after every write for durability. If the flag weren't propagated,
+// a user who requested durability would silently get buffered writes.
 func TestConfigSyncWrites(t *testing.T) {
 	dir := t.TempDir()
 	db, err := Open(filepath.Join(dir, "test.folio"), Config{SyncWrites: true})
@@ -25,6 +37,11 @@ func TestConfigSyncWrites(t *testing.T) {
 	}
 }
 
+// TestConfigHashAlgorithm verifies that each hash algorithm option is
+// accepted, and that the zero value defaults to xxHash3. The algorithm
+// is stored in the header — if the default were wrong, new databases
+// would be created with an invalid algorithm and all Set calls would
+// produce empty IDs.
 func TestConfigHashAlgorithm(t *testing.T) {
 	tests := []struct {
 		alg  int
@@ -47,6 +64,10 @@ func TestConfigHashAlgorithm(t *testing.T) {
 	}
 }
 
+// TestConfigReadBufferDefault verifies that the default read buffer is
+// 64KB. line() allocates this buffer for reading records — too small
+// and large records would require multiple reads, too large and memory
+// usage would spike for many concurrent readers.
 func TestConfigReadBufferDefault(t *testing.T) {
 	db := openTestDB(t)
 
@@ -55,6 +76,9 @@ func TestConfigReadBufferDefault(t *testing.T) {
 	}
 }
 
+// TestConfigReadBufferCustom verifies that a custom buffer size
+// overrides the default. Users with large records may need a bigger
+// buffer to avoid multiple read syscalls per line.
 func TestConfigReadBufferCustom(t *testing.T) {
 	dir := t.TempDir()
 	db, _ := Open(filepath.Join(dir, "test.folio"), Config{ReadBuffer: 128 * 1024})
@@ -65,6 +89,10 @@ func TestConfigReadBufferCustom(t *testing.T) {
 	}
 }
 
+// TestConfigMaxRecordSizeDefault verifies the 16MB default maximum
+// record size. This limit prevents a single Set call from consuming
+// excessive memory and producing a line too long for line() to read
+// in a single buffer allocation.
 func TestConfigMaxRecordSizeDefault(t *testing.T) {
 	db := openTestDB(t)
 
@@ -73,6 +101,9 @@ func TestConfigMaxRecordSizeDefault(t *testing.T) {
 	}
 }
 
+// TestConfigMaxRecordSizeCustom verifies that a custom max record size
+// overrides the default. Smaller limits protect against memory
+// exhaustion in constrained environments.
 func TestConfigMaxRecordSizeCustom(t *testing.T) {
 	dir := t.TempDir()
 	db, _ := Open(filepath.Join(dir, "test.folio"), Config{MaxRecordSize: 8 * 1024 * 1024})
@@ -83,12 +114,21 @@ func TestConfigMaxRecordSizeCustom(t *testing.T) {
 	}
 }
 
+// TestMaxRecordSizeConstant guards the exported constant that defines
+// the default maximum. If it changed, existing documentation and user
+// expectations would be wrong, and users who relied on storing 16MB
+// records would get unexpected errors.
 func TestMaxRecordSizeConstant(t *testing.T) {
 	if MaxRecordSize != 16*1024*1024 {
 		t.Errorf("MaxRecordSize = %d, want %d", MaxRecordSize, 16*1024*1024)
 	}
 }
 
+// TestVeryLargeContent verifies that a 5MB document round-trips
+// correctly. This exercises the read buffer growth path in line() — if
+// the initial 64KB buffer is too small, line() must grow it until the
+// entire record fits. A bug in the growth logic would truncate large
+// records, returning partial content.
 func TestVeryLargeContent(t *testing.T) {
 	db := openTestDB(t)
 

@@ -1,3 +1,18 @@
+// Scan function tests.
+//
+// The scan layer implements the core lookup algorithms: binary search
+// over the sorted section (scan), linear scan over the sparse section
+// (sparse), forward and backward linear scans (scanFwd, scanBack), and
+// the metadata extractor used by compaction (scanm). Each function reads
+// raw bytes from the file and uses fixed-position field extraction to
+// compare IDs and filter by record type.
+//
+// These tests use raw JSONL files (not a full DB) to isolate the scan
+// functions from the write path. Each test constructs a minimal file
+// with known IDs and record types, then verifies the scan function
+// returns the correct results. Also tested: the unpack helper that
+// separates indexes from data records, and the sort comparators
+// (byIDThenTS, byID) that compaction uses to order the rebuilt heap.
 package folio
 
 import (
@@ -6,6 +21,9 @@ import (
 	"testing"
 )
 
+// createScanTestFile writes raw content to a temporary file and returns
+// an open read handle. Used by scan tests to build files with specific
+// record layouts without going through the write layer.
 func createScanTestFile(t *testing.T, content string) *os.File {
 	t.Helper()
 	dir := t.TempDir()
@@ -21,6 +39,8 @@ func createScanTestFile(t *testing.T, content string) *os.File {
 	return f
 }
 
+// fsize is a test helper that returns the file size, failing the test
+// if stat fails.
 func fsize(t *testing.T, f *os.File) int64 {
 	t.Helper()
 	s, err := size(f)
@@ -40,6 +60,10 @@ func makeRecord(id, label string) string {
 	return `{"idx":2,"_id":"` + id + `","_ts":1706000000000,"_l":"` + label + `","_d":"data","_h":"hist"}`
 }
 
+// TestScanFindExisting verifies that binary search finds a record in
+// the middle of a three-record file. This is the core lookup path for
+// Get after compaction — if binary search compared IDs at the wrong
+// byte offset, it would miss the target and return nil.
 func TestScanFindExisting(t *testing.T) {
 	// Sorted index records
 	content := makeIndex("0000000000000001", "a") + "\n" +
@@ -57,6 +81,9 @@ func TestScanFindExisting(t *testing.T) {
 	}
 }
 
+// TestScanNotFound verifies that binary search returns nil for an ID
+// that doesn't exist. If scan returned a near-match instead of nil,
+// Get would return a different document's content.
 func TestScanNotFound(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		makeIndex("0000000000000003", "c") + "\n"
@@ -69,6 +96,9 @@ func TestScanNotFound(t *testing.T) {
 	}
 }
 
+// TestScanEmptyRange verifies that binary search on an empty range
+// returns nil. This is the base case for a fresh database (no
+// compaction yet, so the sorted section is empty).
 func TestScanEmptyRange(t *testing.T) {
 	f := createScanTestFile(t, "")
 	result := scan(f, "anything", 0, 0, TypeIndex)
@@ -77,6 +107,10 @@ func TestScanEmptyRange(t *testing.T) {
 	}
 }
 
+// TestScanFirstRecord verifies that binary search finds the first
+// record in the range. The midpoint calculation must not skip the
+// first line — an off-by-one that started at line 2 would miss
+// documents whose ID sorts first.
 func TestScanFirstRecord(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		makeIndex("0000000000000002", "b") + "\n" +
@@ -90,6 +124,9 @@ func TestScanFirstRecord(t *testing.T) {
 	}
 }
 
+// TestScanLastRecord verifies that binary search finds the last record.
+// The upper-bound logic must not stop one line short — if it did,
+// documents whose ID sorts last would be unreachable.
 func TestScanLastRecord(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		makeIndex("0000000000000002", "b") + "\n" +
@@ -103,6 +140,11 @@ func TestScanLastRecord(t *testing.T) {
 	}
 }
 
+// TestScanWrongType verifies that scan filters by record type. The
+// sorted section interleaves data records and index records for the
+// same document. Get searches for TypeIndex (to find the byte offset);
+// if scan returned a TypeRecord match, Get would try to read _o from
+// a record that doesn't have it.
 func TestScanWrongType(t *testing.T) {
 	// Looking for TypeIndex but file has TypeRecord
 	content := makeRecord("0000000000000001", "a") + "\n"
@@ -115,6 +157,10 @@ func TestScanWrongType(t *testing.T) {
 	}
 }
 
+// TestScanBackFindRecord verifies that scanBack finds the last record
+// when scanning backwards from the end. scanBack is used by the
+// sorted-section search when binary search lands past the target — it
+// must return the nearest valid record before the position.
 func TestScanBackFindRecord(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		makeIndex("0000000000000002", "b") + "\n"
@@ -131,6 +177,9 @@ func TestScanBackFindRecord(t *testing.T) {
 	}
 }
 
+// TestScanBackNoRecord verifies that scanBack returns nil for an empty
+// file. This is the termination condition — without it, scanBack would
+// read past offset 0 and panic.
 func TestScanBackNoRecord(t *testing.T) {
 	f := createScanTestFile(t, "")
 	result := scanBack(f, 0, 0, TypeIndex)
@@ -139,6 +188,10 @@ func TestScanBackNoRecord(t *testing.T) {
 	}
 }
 
+// TestScanFwdFindRecord verifies that scanFwd returns the first valid
+// record when scanning forward. scanFwd is used after binary search
+// finds the approximate position — it walks forward to find the exact
+// match.
 func TestScanFwdFindRecord(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		makeIndex("0000000000000002", "b") + "\n"
@@ -154,6 +207,8 @@ func TestScanFwdFindRecord(t *testing.T) {
 	}
 }
 
+// TestScanFwdNoRecord verifies that scanFwd returns nil for an empty
+// range. This is the termination condition for forward scan.
 func TestScanFwdNoRecord(t *testing.T) {
 	f := createScanTestFile(t, "")
 	result := scanFwd(f, 0, 0, TypeIndex)
@@ -162,6 +217,11 @@ func TestScanFwdNoRecord(t *testing.T) {
 	}
 }
 
+// TestSparseFindByID verifies that sparse() returns all records with a
+// matching ID. Unlike binary search (which returns the first match),
+// sparse collects every match because the sparse region can contain
+// multiple versions of the same document. If sparse stopped after the
+// first match, History would only return one version.
 func TestSparseFindByID(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		makeIndex("0000000000000002", "b") + "\n" +
@@ -175,6 +235,9 @@ func TestSparseFindByID(t *testing.T) {
 	}
 }
 
+// TestSparseEmptyIDReturnsAll verifies that sparse() with an empty ID
+// returns every record. This mode is used by List (which needs all
+// labels) and by the compaction scanner (which reads the entire file).
 func TestSparseEmptyIDReturnsAll(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		makeIndex("0000000000000002", "b") + "\n" +
@@ -188,6 +251,10 @@ func TestSparseEmptyIDReturnsAll(t *testing.T) {
 	}
 }
 
+// TestSparseFiltersByType verifies that sparse() only returns records of
+// the requested type. Get needs TypeIndex; List also needs TypeIndex.
+// If sparse returned TypeRecord alongside TypeIndex, callers would try
+// to read _o from a data record and get a zero offset.
 func TestSparseFiltersByType(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		makeRecord("0000000000000002", "b") + "\n"
@@ -205,6 +272,11 @@ func TestSparseFiltersByType(t *testing.T) {
 	}
 }
 
+// TestSparseSkipsBlanked verifies that sparse() ignores lines that have
+// been blanked with spaces (from delete or update). valid() returns
+// false for lines starting with a space, so sparse must check valid()
+// before attempting JSON parsing. Without this, sparse would error on
+// the blanked line and potentially abort the scan.
 func TestSparseSkipsBlanked(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		"                                                                  \n" + // blanked
@@ -218,6 +290,12 @@ func TestSparseSkipsBlanked(t *testing.T) {
 	}
 }
 
+// TestScanmExtractMetadata verifies that scanm extracts the type, ID,
+// timestamp, label, and byte offset from fixed positions in the line.
+// scanm reads every line in the file during compaction — it uses byte-
+// position extraction instead of JSON parsing for speed. If the field
+// positions were wrong, compaction would sort records incorrectly and
+// generate indexes pointing to the wrong byte offsets.
 func TestScanmExtractMetadata(t *testing.T) {
 	content := makeIndex("0000000000000001", "label-a") + "\n" +
 		makeRecord("0000000000000002", "label-b") + "\n"
@@ -249,6 +327,11 @@ func TestScanmExtractMetadata(t *testing.T) {
 	}
 }
 
+// TestScanmFilterByType verifies that scanm respects the type filter.
+// Compaction calls scanm with a specific type to read only indexes or
+// only data records in separate passes. If the filter were ignored,
+// compaction would mix indexes and data records in the sort, producing
+// a corrupt heap.
 func TestScanmFilterByType(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		makeRecord("0000000000000002", "b") + "\n"
@@ -261,6 +344,10 @@ func TestScanmFilterByType(t *testing.T) {
 	}
 }
 
+// TestScanmSkipsBlanked verifies that scanm ignores blanked (space-
+// overwritten) lines. Blanked lines are remnants of deleted or updated
+// documents. If scanm included them, compaction would try to extract
+// fields from spaces and produce garbage entries in the rebuilt file.
 func TestScanmSkipsBlanked(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
 		"                                                                  \n" +
@@ -274,6 +361,11 @@ func TestScanmSkipsBlanked(t *testing.T) {
 	}
 }
 
+// TestScanmSkipsShortRecords verifies that scanm ignores lines shorter
+// than MinRecordSize. A short line (e.g. from a crash mid-write) cannot
+// contain all fixed-position fields. Without this length check, scanm
+// would read past the end of the line and panic with an index-out-of-
+// bounds error.
 func TestScanmSkipsShortRecords(t *testing.T) {
 	content := "short\n" + makeIndex("0000000000000001", "a") + "\n"
 
@@ -285,6 +377,11 @@ func TestScanmSkipsShortRecords(t *testing.T) {
 	}
 }
 
+// TestUnpackSeparatesTypes verifies that unpack splits a mixed entry
+// list into data+history entries and index entries. Compaction needs
+// them separated: data entries are sorted and written as the heap,
+// index entries are generated fresh. If unpack mixed them, the rebuilt
+// file would have indexes in the heap and data in the index section.
 func TestUnpackSeparatesTypes(t *testing.T) {
 	entries := []Entry{
 		{Type: TypeIndex, ID: "1"},
@@ -303,6 +400,11 @@ func TestUnpackSeparatesTypes(t *testing.T) {
 	}
 }
 
+// TestUnpackExcludeHistory verifies that unpack can exclude specific
+// types. The PurgeHistory option passes TypeHistory to unpack's exclude
+// list, stripping old versions from the data set before rebuild. If
+// the exclusion logic were inverted, purge would keep only history
+// records and discard all current data.
 func TestUnpackExcludeHistory(t *testing.T) {
 	entries := []Entry{
 		{Type: TypeRecord, ID: "1"},
@@ -317,6 +419,9 @@ func TestUnpackExcludeHistory(t *testing.T) {
 	}
 }
 
+// TestUnpackEmpty verifies that unpack handles nil input without
+// panicking. This is the case for an empty database — scanm returns
+// no entries, and unpack must return nil slices rather than crashing.
 func TestUnpackEmpty(t *testing.T) {
 	data, indexes := unpack(nil)
 	if data != nil || indexes != nil {
@@ -324,6 +429,12 @@ func TestUnpackEmpty(t *testing.T) {
 	}
 }
 
+// TestByIDThenTS verifies the sort comparator used during compaction.
+// Records must be sorted by ID first (for binary search) then by
+// timestamp (for version ordering within a document). If the sort
+// order were wrong — e.g. timestamp-first — binary search would fail
+// because records for the same document would be scattered among
+// records from other documents.
 func TestByIDThenTS(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -347,6 +458,9 @@ func TestByIDThenTS(t *testing.T) {
 	}
 }
 
+// TestByID verifies the ID-only comparator used for index sorting.
+// Indexes are sorted by ID alone (no timestamp) because binary search
+// needs exactly one index per document to find.
 func TestByID(t *testing.T) {
 	a := &Entry{ID: "1"}
 	b := &Entry{ID: "2"}

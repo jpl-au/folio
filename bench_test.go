@@ -1,3 +1,25 @@
+// Performance benchmarks.
+//
+// These benchmarks measure the throughput of every major operation under
+// controlled conditions. They serve two purposes:
+//
+//  1. Regression detection — if a code change makes Set 2x slower, the
+//     benchmark numbers will catch it before it ships.
+//  2. Bloom filter evaluation — paired benchmarks (Bloom vs NoBloom)
+//     quantify the speedup from the optional bloom filter on miss-heavy
+//     workloads, helping users decide whether to enable it.
+//
+// Key design choices:
+//   - Set benchmarks use 1KB content to simulate realistic document sizes.
+//   - Get benchmarks separate sparse-only (pre-compaction) from sorted
+//     (post-compaction) to measure the difference between O(n) linear
+//     scan and O(log n) binary search.
+//   - The "ManyDocs" variants use 1000 documents to stress the lookup
+//     algorithms at scale.
+//   - Compact is benchmarked with StopTimer/StartTimer around setup to
+//     isolate the compaction cost from the write cost.
+//   - Mixed workload benchmarks simulate a realistic access pattern:
+//     1/3 sorted hits, 1/3 sparse hits, 1/3 misses.
 package folio
 
 import (

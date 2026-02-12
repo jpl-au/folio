@@ -1,3 +1,14 @@
+// Document isolation tests.
+//
+// Each document is identified by a 16-hex-char ID derived from its
+// label via hash(). Because the ID space is 2^64, collisions are
+// astronomically unlikely for real workloads — but the lookup path must
+// still correctly distinguish documents by comparing the full label
+// string (stored in _l), not just the hash-derived ID. These tests
+// verify that CRUD operations on one document never affect a different
+// document, even when both are in the same file region (sparse or
+// sorted). The "many documents" tests stress this at scale by writing
+// 50–100 documents and confirming every one survives Get and Compact.
 package folio
 
 import (
@@ -5,7 +16,7 @@ import (
 )
 
 // findCollision finds two labels that hash to the same ID.
-// This is for testing purposes - in practice collisions are rare.
+// This is for testing purposes — in practice collisions are rare.
 func findCollision(alg int) (string, string) {
 	seen := make(map[string]string)
 	for i := 0; i < 100000; i++ {
@@ -19,6 +30,10 @@ func findCollision(alg int) (string, string) {
 	return "", "" // No collision found in range
 }
 
+// TestHashCollisionGet verifies that Get returns the correct content
+// for each of two documents. If Get only matched on the ID (hash) and
+// not the label, a hash collision would cause it to return the wrong
+// document's content.
 func TestHashCollisionGet(t *testing.T) {
 	// Use labels that we manually verify have different hashes
 	// (actual collisions are extremely rare with good hash functions)
@@ -38,6 +53,10 @@ func TestHashCollisionGet(t *testing.T) {
 	}
 }
 
+// TestHashCollisionSet verifies that updating one document doesn't
+// affect another. Set must find and blank only the old index for the
+// target label. If it blanked any index with the same ID, an update
+// to doc-one would destroy doc-two's index, making it unfindable.
 func TestHashCollisionSet(t *testing.T) {
 	db := openTestDB(t)
 
@@ -60,6 +79,10 @@ func TestHashCollisionSet(t *testing.T) {
 	}
 }
 
+// TestHashCollisionDelete verifies that deleting one document doesn't
+// affect another. Delete must match on the full label, not just the ID.
+// If it blanked the wrong index, a Delete("first") could destroy
+// "second"'s lookup entry.
 func TestHashCollisionDelete(t *testing.T) {
 	db := openTestDB(t)
 
@@ -79,6 +102,10 @@ func TestHashCollisionDelete(t *testing.T) {
 	}
 }
 
+// TestHashCollisionExists verifies that Exists correctly distinguishes
+// between a document that exists and one that doesn't. If Exists only
+// checked the ID, any document with the same hash prefix would appear
+// to exist.
 func TestHashCollisionExists(t *testing.T) {
 	db := openTestDB(t)
 
@@ -95,6 +122,11 @@ func TestHashCollisionExists(t *testing.T) {
 	}
 }
 
+// TestHashCollisionHistory verifies that History returns versions only
+// for the requested document. History uses group() which walks forward
+// through the heap collecting records with the same ID — but it must
+// also check the label to avoid mixing versions from different documents
+// that might share an ID.
 func TestHashCollisionHistory(t *testing.T) {
 	db := openTestDB(t)
 
@@ -113,6 +145,10 @@ func TestHashCollisionHistory(t *testing.T) {
 	}
 }
 
+// TestHashCollisionAfterCompact verifies document isolation after
+// compaction. Compact sorts records by ID, so two documents with close
+// IDs will be adjacent in the heap. Binary search must still distinguish
+// them by label, not just by the ID it used to find the region.
 func TestHashCollisionAfterCompact(t *testing.T) {
 	db := openTestDB(t)
 
@@ -132,6 +168,10 @@ func TestHashCollisionAfterCompact(t *testing.T) {
 	}
 }
 
+// TestHashCollisionSortedThenSparse exercises the two-region lookup
+// when documents live in different sections. One document is compacted
+// into the sorted section; a second is written to sparse afterward.
+// Get must search both regions and return the correct content for each.
 func TestHashCollisionSortedThenSparse(t *testing.T) {
 	db := openTestDB(t)
 
@@ -154,6 +194,10 @@ func TestHashCollisionSortedThenSparse(t *testing.T) {
 	}
 }
 
+// TestManyDocumentsDifferentLabels writes 100 documents and verifies
+// every one is retrievable. With 100 unique IDs in the sparse region,
+// this stresses the linear scan path — if sparse() had an off-by-one
+// in its loop or stopped early, some documents would be missing.
 func TestManyDocumentsDifferentLabels(t *testing.T) {
 	db := openTestDB(t)
 
@@ -177,6 +221,11 @@ func TestManyDocumentsDifferentLabels(t *testing.T) {
 	}
 }
 
+// TestManyDocumentsAfterCompact writes 50 documents, compacts, and
+// verifies every one survives. This stresses the sorted-section binary
+// search with a realistic number of entries — if the sort order were
+// wrong or the index offsets drifted during rebuild, some documents
+// would be unreachable.
 func TestManyDocumentsAfterCompact(t *testing.T) {
 	db := openTestDB(t)
 

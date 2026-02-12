@@ -1,9 +1,31 @@
+// Search and MatchLabel tests.
+//
+// Search scans every record in the file and matches a pattern against
+// the document content. MatchLabel does the same but matches against
+// the label field. Both support regex patterns and have two execution
+// paths: a literal fast path (when the pattern has no regex meta-
+// characters) that matches against the raw JSON bytes without
+// unescaping, and a regex path that optionally unescapes content first
+// (Decode: true).
+//
+// The fast path is important for performance — it avoids allocating
+// a new string for every record. But it means special characters in
+// content (quotes, backslashes, newlines) are stored as JSON escape
+// sequences (\" \\ \n) in the raw bytes. These tests verify that both
+// paths produce correct results for all combinations of: plain text,
+// quoted content, content with newlines, content with backslashes,
+// case-sensitive/insensitive matching, regex patterns, and the Decode
+// option.
 package folio
 
 import (
 	"testing"
 )
 
+// TestSearchMatchFound verifies the basic case: a substring match in
+// document content. If Search failed to scan the sparse region or
+// miscompared the pattern, it would return empty results for content
+// that clearly matches.
 func TestSearchMatchFound(t *testing.T) {
 	db := openTestDB(t)
 
@@ -18,6 +40,9 @@ func TestSearchMatchFound(t *testing.T) {
 	}
 }
 
+// TestSearchNoMatch verifies that Search returns empty when no document
+// contains the pattern. If Search had a bug that matched empty strings
+// or partial bytes, every query would return false positives.
 func TestSearchNoMatch(t *testing.T) {
 	db := openTestDB(t)
 
@@ -29,6 +54,10 @@ func TestSearchNoMatch(t *testing.T) {
 	}
 }
 
+// TestSearchCaseInsensitiveDefault verifies that Search is case-
+// insensitive by default. Users expect "hello" to match "Hello" unless
+// they explicitly opt into case-sensitive mode. If the default were
+// case-sensitive, users would miss documents that differ only in case.
 func TestSearchCaseInsensitiveDefault(t *testing.T) {
 	db := openTestDB(t)
 
@@ -40,6 +69,10 @@ func TestSearchCaseInsensitiveDefault(t *testing.T) {
 	}
 }
 
+// TestSearchCaseSensitive verifies the CaseSensitive option. When
+// enabled, "HELLO" must not match "Hello". If the option were ignored,
+// users who need exact matching (e.g. code search) would get spurious
+// results.
 func TestSearchCaseSensitive(t *testing.T) {
 	db := openTestDB(t)
 
@@ -56,6 +89,10 @@ func TestSearchCaseSensitive(t *testing.T) {
 	}
 }
 
+// TestSearchLimit verifies that the Limit option caps the number of
+// results. Without a limit, Search would scan the entire file even when
+// the caller only needs the first few matches — a waste of time for
+// large databases.
 func TestSearchLimit(t *testing.T) {
 	db := openTestDB(t)
 
@@ -67,6 +104,9 @@ func TestSearchLimit(t *testing.T) {
 	}
 }
 
+// TestSearchRegex verifies that patterns with regex metacharacters are
+// compiled and matched as regular expressions. The literal fast path
+// would miss "hel.*rld" because it doesn't interpret metacharacters.
 func TestSearchRegex(t *testing.T) {
 	db := openTestDB(t)
 
@@ -78,6 +118,10 @@ func TestSearchRegex(t *testing.T) {
 	}
 }
 
+// TestSearchInvalidRegex verifies that an invalid regex pattern returns
+// ErrInvalidPattern rather than panicking. If Search passed the pattern
+// to regexp.Compile without checking, an invalid pattern would cause a
+// runtime panic that crashes the caller.
 func TestSearchInvalidRegex(t *testing.T) {
 	db := openTestDB(t)
 
@@ -89,6 +133,9 @@ func TestSearchInvalidRegex(t *testing.T) {
 	}
 }
 
+// TestSearchClosed verifies that Search on a closed database returns
+// ErrClosed. Search reads from the file handle; without this check, it
+// would attempt to read from a closed handle and produce an OS error.
 func TestSearchClosed(t *testing.T) {
 	db := openTestDB(t)
 	db.Set("doc", "content")
@@ -100,6 +147,10 @@ func TestSearchClosed(t *testing.T) {
 	}
 }
 
+// TestMatchLabelFound verifies that MatchLabel finds a document whose
+// label contains the pattern. MatchLabel is used for fuzzy label lookup
+// (e.g. "find all documents whose label contains 'app'"). If it only
+// matched exact labels, users would need to know the full label.
 func TestMatchLabelFound(t *testing.T) {
 	db := openTestDB(t)
 
@@ -117,6 +168,8 @@ func TestMatchLabelFound(t *testing.T) {
 	}
 }
 
+// TestMatchLabelNoMatch verifies that MatchLabel returns empty when no
+// label contains the pattern.
 func TestMatchLabelNoMatch(t *testing.T) {
 	db := openTestDB(t)
 
@@ -128,6 +181,8 @@ func TestMatchLabelNoMatch(t *testing.T) {
 	}
 }
 
+// TestMatchLabelCaseInsensitive verifies that MatchLabel is case-
+// insensitive by default, matching the same convention as Search.
 func TestMatchLabelCaseInsensitive(t *testing.T) {
 	db := openTestDB(t)
 
@@ -139,6 +194,8 @@ func TestMatchLabelCaseInsensitive(t *testing.T) {
 	}
 }
 
+// TestMatchLabelInvalidRegex verifies that an invalid regex pattern
+// returns ErrInvalidPattern.
 func TestMatchLabelInvalidRegex(t *testing.T) {
 	db := openTestDB(t)
 
@@ -150,6 +207,8 @@ func TestMatchLabelInvalidRegex(t *testing.T) {
 	}
 }
 
+// TestMatchLabelClosed verifies that MatchLabel returns ErrClosed on a
+// closed database.
 func TestMatchLabelClosed(t *testing.T) {
 	db := openTestDB(t)
 	db.Set("doc", "content")
@@ -161,6 +220,10 @@ func TestMatchLabelClosed(t *testing.T) {
 	}
 }
 
+// TestMatchLabelMultiple verifies that MatchLabel returns all matching
+// documents, not just the first. If it stopped after the first match,
+// users couldn't discover all documents in a namespace (e.g. all
+// "app-*" documents).
 func TestMatchLabelMultiple(t *testing.T) {
 	db := openTestDB(t)
 
@@ -174,6 +237,12 @@ func TestMatchLabelMultiple(t *testing.T) {
 	}
 }
 
+// TestSearchDecodeQuotes exercises both execution paths for content
+// containing double quotes. In raw JSON, a quote in content is stored
+// as \". The literal fast path JSON-escapes the query to match the raw
+// bytes; the Decode path unescapes the content first. Both must find
+// the match — if either path mishandled quote escaping, documents with
+// quoted content would be unsearchable.
 func TestSearchDecodeQuotes(t *testing.T) {
 	db := openTestDB(t)
 
@@ -196,6 +265,12 @@ func TestSearchDecodeQuotes(t *testing.T) {
 	}
 }
 
+// TestSearchRegexDecodeQuotes verifies that the regex path without
+// Decode cannot match literal quotes (because they're escaped in the
+// raw JSON), but with Decode it can. This is the key difference between
+// the two modes: without Decode, the regex runs against raw JSON bytes
+// where quotes are \"; with Decode, it runs against the unescaped
+// content where quotes are literal ".
 func TestSearchRegexDecodeQuotes(t *testing.T) {
 	db := openTestDB(t)
 
@@ -215,6 +290,11 @@ func TestSearchRegexDecodeQuotes(t *testing.T) {
 	}
 }
 
+// TestSearchLiteralNewline verifies that the literal fast path matches
+// content containing newlines. In JSON, a newline in content is stored
+// as \n (two bytes). The literal path JSON-escapes the query's newline
+// to match the raw bytes. If it didn't escape the query, the \n in the
+// raw bytes would never match the literal newline character.
 func TestSearchLiteralNewline(t *testing.T) {
 	db := openTestDB(t)
 
@@ -231,6 +311,10 @@ func TestSearchLiteralNewline(t *testing.T) {
 	}
 }
 
+// TestSearchBothPathsNewline verifies that both the literal and regex
+// paths find a substring in content that spans a newline. This catches
+// bugs where the search might stop at the first line of multi-line
+// content.
 func TestSearchBothPathsNewline(t *testing.T) {
 	db := openTestDB(t)
 
@@ -249,6 +333,9 @@ func TestSearchBothPathsNewline(t *testing.T) {
 	}
 }
 
+// TestSearchBothPathsQuotes verifies that both paths find a quoted
+// substring. The literal path JSON-escapes the query; the regex+Decode
+// path unescapes the content. Both must produce a match.
 func TestSearchBothPathsQuotes(t *testing.T) {
 	db := openTestDB(t)
 
@@ -267,6 +354,10 @@ func TestSearchBothPathsQuotes(t *testing.T) {
 	}
 }
 
+// TestSearchDecodePlain verifies that Decode:true works with plain
+// content that has no escape sequences. The decode path must not break
+// content that doesn't need unescaping — if it corrupted plain strings,
+// the most common search case would fail.
 func TestSearchDecodePlain(t *testing.T) {
 	db := openTestDB(t)
 
@@ -282,6 +373,11 @@ func TestSearchDecodePlain(t *testing.T) {
 	}
 }
 
+// TestSearchDecodeBackslash verifies that the Decode path correctly
+// unescapes backslashes. In JSON, a literal backslash is stored as \\.
+// The regex `path\\to` matches the unescaped content "path\to". If
+// unescape() didn't handle \\, the decoded content would still contain
+// the escape sequence and the regex wouldn't match.
 func TestSearchDecodeBackslash(t *testing.T) {
 	db := openTestDB(t)
 
@@ -296,6 +392,10 @@ func TestSearchDecodeBackslash(t *testing.T) {
 	}
 }
 
+// TestSearchDecodeNewline verifies that the Decode path correctly
+// unescapes newlines. In JSON, a newline is stored as \n (two bytes).
+// The Decode path must convert this to a real newline character so the
+// search pattern (which contains a real newline) can match.
 func TestSearchDecodeNewline(t *testing.T) {
 	db := openTestDB(t)
 
