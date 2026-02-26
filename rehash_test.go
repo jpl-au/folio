@@ -75,7 +75,7 @@ func TestRehashHistoryAccessible(t *testing.T) {
 
 	db.Rehash(AlgBlake2b)
 
-	versions, _ := db.History("doc")
+	versions, _ := collect(db.History("doc"))
 	if len(versions) != 3 {
 		t.Errorf("History after rehash: got %d, want 3", len(versions))
 	}

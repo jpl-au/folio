@@ -10,10 +10,25 @@
 package folio
 
 import (
+	"iter"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// collect materialises an iter.Seq2[T, error] into a slice, stopping
+// on the first error. Used across the test suite wherever callers need
+// to inspect the full result set (length checks, index access, etc.).
+func collect[T any](seq iter.Seq2[T, error]) ([]T, error) {
+	var items []T
+	for item, err := range seq {
+		if err != nil {
+			return items, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
 
 // openTestDB creates a fresh database in a temporary directory and
 // registers cleanup to close it when the test finishes. Used by
@@ -317,7 +332,7 @@ func TestExists(t *testing.T) {
 func TestList(t *testing.T) {
 	db := openTestDB(t)
 
-	labels, _ := db.List()
+	labels, _ := collect(db.List())
 	if len(labels) != 0 {
 		t.Errorf("List empty db: got %d, want 0", len(labels))
 	}
@@ -326,7 +341,7 @@ func TestList(t *testing.T) {
 	db.Set("b", "2")
 	db.Set("c", "3")
 
-	labels, _ = db.List()
+	labels, _ = collect(db.List())
 	if len(labels) != 3 {
 		t.Errorf("List: got %d labels, want 3", len(labels))
 	}
@@ -343,7 +358,7 @@ func TestListAfterDelete(t *testing.T) {
 	db.Set("b", "2")
 	db.Delete("a")
 
-	labels, _ := db.List()
+	labels, _ := collect(db.List())
 	if len(labels) != 1 {
 		t.Errorf("List after delete: got %d, want 1", len(labels))
 	}
@@ -368,7 +383,7 @@ func TestHistoryMultiDocCompact(t *testing.T) {
 	db.Compact()
 
 	// Exercises group() forward walk stopping at a different ID boundary
-	versions, err := db.History("a")
+	versions, err := collect(db.History("a"))
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -390,7 +405,7 @@ func TestHistorySparseOnly(t *testing.T) {
 	db.Set("b", "new") // only in sparse region
 
 	// Exercises group() returning nil (ID not in heap)
-	versions, err := db.History("b")
+	versions, err := collect(db.History("b"))
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -410,7 +425,7 @@ func TestHistory(t *testing.T) {
 	db.Set("doc", "v2")
 	db.Set("doc", "v3")
 
-	versions, err := db.History("doc")
+	versions, err := collect(db.History("doc"))
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -438,7 +453,7 @@ func TestHistoryAfterDelete(t *testing.T) {
 	db.Set("doc", "v2")
 	db.Delete("doc")
 
-	versions, _ := db.History("doc")
+	versions, _ := collect(db.History("doc"))
 	if len(versions) != 2 {
 		t.Errorf("History after delete: got %d, want 2", len(versions))
 	}
@@ -451,7 +466,7 @@ func TestHistoryAfterDelete(t *testing.T) {
 func TestHistoryNonexistent(t *testing.T) {
 	db := openTestDB(t)
 
-	versions, _ := db.History("nonexistent")
+	versions, _ := collect(db.History("nonexistent"))
 	if len(versions) != 0 {
 		t.Errorf("History nonexistent: got %d, want 0", len(versions))
 	}
@@ -478,7 +493,7 @@ func TestCompact(t *testing.T) {
 		t.Errorf("Get after compact = %q, want %q", data, "1-updated")
 	}
 
-	versions, _ := db.History("a")
+	versions, _ := collect(db.History("a"))
 	if len(versions) != 2 {
 		t.Errorf("History after compact: got %d, want 2", len(versions))
 	}
@@ -505,7 +520,7 @@ func TestPurge(t *testing.T) {
 		t.Errorf("Get after purge = %q, want %q", data, "v3")
 	}
 
-	versions, _ := db.History("doc")
+	versions, _ := collect(db.History("doc"))
 	if len(versions) != 1 {
 		t.Errorf("History after purge: got %d, want 1 (current only)", len(versions))
 	}

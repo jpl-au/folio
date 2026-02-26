@@ -248,9 +248,9 @@ func scanm(f *os.File, start, end int64, recordType int) []Entry {
 		length := len(ln)
 
 		if valid(ln) && length >= MinRecordSize {
-			t := int(ln[7] - '0')  // {"idx":N — type at byte 7
+			t := int(ln[7] - '0') // {"idx":N — type at byte 7
 			if recordType == 0 || t == recordType {
-				id := string(ln[16:32])  // _id at bytes 16..31
+				id := string(ln[16:32])                              // _id at bytes 16..31
 				ts, _ := strconv.ParseInt(string(ln[40:53]), 10, 64) // _ts at bytes 40..52
 				lbl := ""
 				if t == TypeIndex {

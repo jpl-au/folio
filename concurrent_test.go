@@ -34,11 +34,9 @@ func TestConcurrentReads(t *testing.T) {
 	db.Set("doc", "content")
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+	for range 10 {
+		wg.Go(func() {
+			for range 100 {
 				data, err := db.Get("doc")
 				if err != nil {
 					t.Errorf("Get: %v", err)
@@ -49,7 +47,7 @@ func TestConcurrentReads(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -63,12 +61,12 @@ func TestConcurrentWrites(t *testing.T) {
 	db := openTestDB(t)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
 			label := "doc"
-			for j := 0; j < 10; j++ {
+			for range 10 {
 				db.Set(label, "content")
 			}
 		}(i)
@@ -95,26 +93,24 @@ func TestConcurrentReadWrite(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Readers
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 50; j++ {
+	for range 5 {
+		wg.Go(func() {
+			for range 50 {
 				_, err := db.Get("doc")
 				if err != nil && err != ErrNotFound {
 					t.Errorf("Get: %v", err)
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	// Writers
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			for j := 0; j < 10; j++ {
+			for range 10 {
 				db.Set("doc", "content")
 			}
 		}(i)
@@ -140,13 +136,11 @@ func TestCloseWakesWaiters(t *testing.T) {
 	errChan := make(chan error, 10)
 
 	// Start waiters
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 5 {
+		wg.Go(func() {
 			_, err := db.Get("doc")
 			errChan <- err
-		}()
+		})
 	}
 
 	// Close the DB - should wake all waiters
@@ -172,17 +166,15 @@ func TestCloseWakesWaiters(t *testing.T) {
 func TestConcurrentList(t *testing.T) {
 	db := openTestDB(t)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		db.Set(string(rune('a'+i)), "content")
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 50; j++ {
-				labels, err := db.List()
+	for range 10 {
+		wg.Go(func() {
+			for range 50 {
+				labels, err := collect(db.List())
 				if err != nil {
 					t.Errorf("List: %v", err)
 					return
@@ -192,7 +184,7 @@ func TestConcurrentList(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -211,12 +203,10 @@ func TestCloseWakesWriteWaiters(t *testing.T) {
 	var wg sync.WaitGroup
 	errChan := make(chan error, 5)
 
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 5 {
+		wg.Go(func() {
 			errChan <- db.Set("doc", "updated")
-		}()
+		})
 	}
 
 	go func() { db.Close() }()
@@ -241,26 +231,24 @@ func TestCloseWakesWriteWaiters(t *testing.T) {
 func TestConcurrentCompactRead(t *testing.T) {
 	db := openTestDB(t)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		db.Set(string(rune('a'+i)), "content")
 	}
 
 	var wg sync.WaitGroup
 
 	// Compact in background
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		db.Compact()
-	}()
+	})
 
 	// Concurrent reads
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
 			label := string(rune('a' + n))
-			for j := 0; j < 20; j++ {
+			for range 20 {
 				_, err := db.Get(label)
 				if err != nil && err != ErrNotFound {
 					t.Errorf("Get during compact: %v", err)

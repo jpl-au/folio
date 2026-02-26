@@ -28,11 +28,12 @@ package folio
 
 import (
 	"fmt"
-	json "github.com/goccy/go-json"
 	"io"
 	"maps"
 	"os"
 	"slices"
+
+	json "github.com/goccy/go-json"
 )
 
 type CompactOptions struct {

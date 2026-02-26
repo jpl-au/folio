@@ -23,6 +23,8 @@
 //
 // MatchLabel scans index records (idx=1) and matches against _l.
 // Both stream through the file line-by-line to avoid loading it into memory.
+// Callers consume results lazily via range and can break early to stop the
+// scan without reading the rest of the file.
 package folio
 
 import (
@@ -30,159 +32,163 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"iter"
 	"regexp"
 
 	json "github.com/goccy/go-json"
 )
 
+// SearchOptions configures Search behaviour. Callers control result count
+// by breaking out of the range loop — no Limit field is needed.
 type SearchOptions struct {
 	CaseSensitive bool
-	Limit         int
 	Decode        bool // unescape JSON string escapes in _d before matching; bypasses literal fast path
 }
 
+// Match is a single search result: a label and the byte offset of the
+// matching record in the file.
 type Match struct {
 	Label  string
 	Offset int64
 }
 
 // Search matches a pattern against the _d field of current data records.
-func (db *DB) Search(pattern string, opts SearchOptions) ([]Match, error) {
-	if err := db.blockRead(); err != nil {
-		return nil, err
-	}
-	defer func() {
-		db.mu.RUnlock()
-		db.lock.Unlock()
-	}()
+// Results are yielded lazily; break from the range loop to stop early.
+func (db *DB) Search(pattern string, opts SearchOptions) iter.Seq2[Match, error] {
+	return func(yield func(Match, error) bool) {
+		if err := db.blockRead(); err != nil {
+			yield(Match{}, err)
+			return
+		}
+		defer func() {
+			db.mu.RUnlock()
+			db.lock.Unlock()
+		}()
 
-	var match func([]byte) bool
-	var decode bool
+		var match func([]byte) bool
+		var decode bool
 
-	if !opts.Decode && regexp.QuoteMeta(pattern) == pattern {
-		// Literal fast path: JSON-escape the query to match raw _d bytes.
-		// Skipped when Decode is set because the caller wants full unescape
-		// semantics, which may resolve non-standard sequences (e.g. \u0041)
-		// that the escaped-needle approach would miss.
-		raw, _ := json.Marshal(pattern)
-		needle := raw[1 : len(raw)-1]
-		if opts.CaseSensitive {
-			match = func(content []byte) bool {
-				return bytes.Contains(content, needle)
+		if !opts.Decode && regexp.QuoteMeta(pattern) == pattern {
+			raw, _ := json.Marshal(pattern)
+			needle := raw[1 : len(raw)-1]
+			if opts.CaseSensitive {
+				match = func(content []byte) bool {
+					return bytes.Contains(content, needle)
+				}
+			} else {
+				lower := bytes.ToLower(needle)
+				match = func(content []byte) bool {
+					return bytes.Contains(bytes.ToLower(content), lower)
+				}
 			}
 		} else {
-			lower := bytes.ToLower(needle)
-			match = func(content []byte) bool {
-				return bytes.Contains(bytes.ToLower(content), lower)
+			if !opts.CaseSensitive {
+				pattern = "(?i)" + pattern
 			}
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				yield(Match{}, ErrInvalidPattern)
+				return
+			}
+			match = re.Match
+			decode = opts.Decode
 		}
-	} else {
-		// Regex path: used for patterns with metacharacters or when Decode
-		// is set (requiring content unescape before matching).
-		if !opts.CaseSensitive {
-			pattern = "(?i)" + pattern
-		}
-		re, err := regexp.Compile(pattern)
+
+		sz, err := size(db.reader)
 		if err != nil {
-			return nil, ErrInvalidPattern
+			yield(Match{}, fmt.Errorf("search: stat: %w", err))
+			return
 		}
-		match = re.Match
-		decode = opts.Decode
-	}
+		section := io.NewSectionReader(db.reader, HeaderSize, sz-HeaderSize)
+		scanner := bufio.NewScanner(section)
+		scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
 
-	sz, err := size(db.reader)
-	if err != nil {
-		return nil, fmt.Errorf("search: stat: %w", err)
-	}
-	section := io.NewSectionReader(db.reader, HeaderSize, sz-HeaderSize)
-	scanner := bufio.NewScanner(section)
-	scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
+		offset := int64(HeaderSize)
 
-	var results []Match
-	offset := int64(HeaderSize)
+		dTag := []byte(`"_d":"`)
+		hTag := []byte(`","_h":"`)
 
-	dTag := []byte(`"_d":"`)
-	hTag := []byte(`","_h":"`)
+		for scanner.Scan() {
+			ln := scanner.Bytes()
 
-	for scanner.Scan() {
-		ln := scanner.Bytes()
-
-		if valid(ln) && len(ln) >= MinRecordSize && ln[7] == byte('0'+TypeRecord) {
-			di := bytes.Index(ln, dTag)
-			if di >= 0 {
-				start := di + len(dTag)
-				hi := bytes.Index(ln[start:], hTag)
-				if hi >= 0 {
-					content := ln[start : start+hi]
-					if decode {
-						content = unescape(content)
-					}
-					if match(content) {
-						results = append(results, Match{Label: label(ln), Offset: offset})
-						if opts.Limit > 0 && len(results) >= opts.Limit {
-							break
+			if valid(ln) && len(ln) >= MinRecordSize && ln[7] == byte('0'+TypeRecord) {
+				di := bytes.Index(ln, dTag)
+				if di >= 0 {
+					start := di + len(dTag)
+					hi := bytes.Index(ln[start:], hTag)
+					if hi >= 0 {
+						content := ln[start : start+hi]
+						if decode {
+							content = unescape(content)
+						}
+						if match(content) {
+							if !yield(Match{Label: label(ln), Offset: offset}, nil) {
+								return
+							}
 						}
 					}
 				}
 			}
+
+			offset += int64(len(ln)) + 1
 		}
 
-		offset += int64(len(ln)) + 1
+		if err := scanner.Err(); err != nil {
+			yield(Match{}, err)
+		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	return results, nil
 }
 
 // MatchLabel matches a regex against the _l field of index records.
 // Only index lines (idx=1) are checked, so the scan skips data records
-// entirely using the type byte at position 7.
-func (db *DB) MatchLabel(pattern string) ([]Match, error) {
-	if err := db.blockRead(); err != nil {
-		return nil, err
-	}
-	defer func() {
-		db.mu.RUnlock()
-		db.lock.Unlock()
-	}()
+// entirely using the type byte at position 7. Results are yielded lazily.
+func (db *DB) MatchLabel(pattern string) iter.Seq2[Match, error] {
+	return func(yield func(Match, error) bool) {
+		if err := db.blockRead(); err != nil {
+			yield(Match{}, err)
+			return
+		}
+		defer func() {
+			db.mu.RUnlock()
+			db.lock.Unlock()
+		}()
 
-	fullPattern := `(?i){"idx":1.*"_l":"[^"]*` + pattern + `[^"]*"`
-	re, err := regexp.Compile(fullPattern)
-	if err != nil {
-		return nil, ErrInvalidPattern
-	}
-
-	sz, err := size(db.reader)
-	if err != nil {
-		return nil, fmt.Errorf("matchlabel: stat: %w", err)
-	}
-	section := io.NewSectionReader(db.reader, 0, sz)
-	scanner := bufio.NewScanner(section)
-	scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
-
-	var results []Match
-	var offset int64
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-
-		if len(line) > 8 && line[7] == '1' { // idx=1 → index record
-			loc := re.FindIndex(line)
-			if loc != nil {
-				lbl := label(line)
-				results = append(results, Match{Label: lbl, Offset: offset + int64(loc[0])})
-			}
+		fullPattern := `(?i){"idx":1.*"_l":"[^"]*` + pattern + `[^"]*"`
+		re, err := regexp.Compile(fullPattern)
+		if err != nil {
+			yield(Match{}, ErrInvalidPattern)
+			return
 		}
 
-		offset += int64(len(line)) + 1
-	}
+		sz, err := size(db.reader)
+		if err != nil {
+			yield(Match{}, fmt.Errorf("matchlabel: stat: %w", err))
+			return
+		}
+		section := io.NewSectionReader(db.reader, 0, sz)
+		scanner := bufio.NewScanner(section)
+		scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
 
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
+		var offset int64
 
-	return results, nil
+		for scanner.Scan() {
+			line := scanner.Bytes()
+
+			if len(line) > 8 && line[7] == '1' {
+				loc := re.FindIndex(line)
+				if loc != nil {
+					lbl := label(line)
+					if !yield(Match{Label: lbl, Offset: offset + int64(loc[0])}, nil) {
+						return
+					}
+				}
+			}
+
+			offset += int64(len(line)) + 1
+		}
+
+		if err := scanner.Err(); err != nil {
+			yield(Match{}, err)
+		}
+	}
 }

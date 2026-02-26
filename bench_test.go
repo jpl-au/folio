@@ -87,7 +87,7 @@ func BenchmarkGetManyDocsSparse(b *testing.B) {
 	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		db.Set("doc"+strconv.Itoa(i), "content")
 	}
 
@@ -102,7 +102,7 @@ func BenchmarkGetManyDocsSorted(b *testing.B) {
 	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		db.Set("doc"+strconv.Itoa(i), "content")
 	}
 	db.Compact()
@@ -131,13 +131,14 @@ func BenchmarkList(b *testing.B) {
 	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		db.Set("doc"+strconv.Itoa(i), "content")
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db.List()
+		for range db.List() {
+		}
 	}
 }
 
@@ -146,13 +147,14 @@ func BenchmarkHistory(b *testing.B) {
 	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
 	defer db.Close()
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		db.Set("doc", "version"+strconv.Itoa(i))
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db.History("doc")
+		for range db.History("doc") {
+		}
 	}
 }
 
@@ -161,7 +163,7 @@ func BenchmarkCompact(b *testing.B) {
 		b.StopTimer()
 		dir := b.TempDir()
 		db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
-		for j := 0; j < 100; j++ {
+		for j := range 100 {
 			db.Set("doc"+strconv.Itoa(j), "content")
 		}
 		b.StartTimer()
@@ -225,7 +227,7 @@ func benchSearchDB(b *testing.B) *DB {
 	}
 	b.Cleanup(func() { db.Close() })
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		db.Set("doc"+strconv.Itoa(i),
 			`hello "world" with some\nescaped content `+strconv.Itoa(i)+
 				` and more text to make it roughly one kilobyte `+
@@ -238,7 +240,8 @@ func BenchmarkSearchRaw(b *testing.B) {
 	db := benchSearchDB(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db.Search("hello", SearchOptions{})
+		for range db.Search("hello", SearchOptions{}) {
+		}
 	}
 }
 
@@ -246,7 +249,8 @@ func BenchmarkSearchDecode(b *testing.B) {
 	db := benchSearchDB(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db.Search("hello", SearchOptions{Decode: true})
+		for range db.Search("hello", SearchOptions{Decode: true}) {
+		}
 	}
 }
 
@@ -254,7 +258,8 @@ func BenchmarkSearchRawMiss(b *testing.B) {
 	db := benchSearchDB(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db.Search("zzznomatch", SearchOptions{})
+		for range db.Search("zzznomatch", SearchOptions{}) {
+		}
 	}
 }
 
@@ -262,7 +267,8 @@ func BenchmarkSearchDecodeMiss(b *testing.B) {
 	db := benchSearchDB(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db.Search("zzznomatch", SearchOptions{Decode: true})
+		for range db.Search("zzznomatch", SearchOptions{Decode: true}) {
+		}
 	}
 }
 
@@ -270,7 +276,8 @@ func BenchmarkMatchLabel(b *testing.B) {
 	db := benchSearchDB(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db.MatchLabel("doc")
+		for range db.MatchLabel("doc") {
+		}
 	}
 }
 
@@ -278,7 +285,8 @@ func BenchmarkMatchLabelMiss(b *testing.B) {
 	db := benchSearchDB(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db.MatchLabel("zzznomatch")
+		for range db.MatchLabel("zzznomatch") {
+		}
 	}
 }
 
@@ -307,7 +315,7 @@ func benchMissDB(b *testing.B, bloom bool) *DB {
 	}
 	b.Cleanup(func() { db.Close() })
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		db.Set("doc"+strconv.Itoa(i), "content")
 	}
 	return db
@@ -355,7 +363,7 @@ func BenchmarkBloomAdd(b *testing.B) {
 
 func BenchmarkBloomContains(b *testing.B) {
 	bl := newBloom()
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		bl.Add("id-" + strconv.Itoa(i))
 	}
 	b.ResetTimer()
@@ -375,13 +383,13 @@ func benchMixedDB(b *testing.B, bloom bool) *DB {
 	b.Cleanup(func() { db.Close() })
 
 	// 500 docs compacted into sorted index
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		db.Set("sorted-"+strconv.Itoa(i), "content")
 	}
 	db.Compact()
 
 	// 500 docs in sparse region
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		db.Set("sparse-"+strconv.Itoa(i), "content")
 	}
 	return db
@@ -469,7 +477,7 @@ func BenchmarkGetMixedWorkloadNoBloom(b *testing.B) {
 func BenchmarkOpenBloom(b *testing.B) {
 	dir := b.TempDir()
 	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		db.Set("doc"+strconv.Itoa(i), "content")
 	}
 	db.Close()
@@ -484,7 +492,7 @@ func BenchmarkOpenBloom(b *testing.B) {
 func BenchmarkOpenNoBloom(b *testing.B) {
 	dir := b.TempDir()
 	db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		db.Set("doc"+strconv.Itoa(i), "content")
 	}
 	db.Close()
@@ -501,7 +509,7 @@ func BenchmarkRehash(b *testing.B) {
 		b.StopTimer()
 		dir := b.TempDir()
 		db, _ := Open(filepath.Join(dir, "bench.folio"), Config{})
-		for j := 0; j < 100; j++ {
+		for j := range 100 {
 			db.Set("doc"+strconv.Itoa(j), "content")
 		}
 		b.StartTimer()

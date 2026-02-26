@@ -19,7 +19,7 @@ import (
 // This is for testing purposes — in practice collisions are rare.
 func findCollision(alg int) (string, string) {
 	seen := make(map[string]string)
-	for i := 0; i < 100000; i++ {
+	for i := range 100000 {
 		label := string(rune('a'+i%26)) + string(rune('0'+i/26))
 		id := hash(label, alg)
 		if existing, ok := seen[id]; ok {
@@ -134,8 +134,8 @@ func TestHashCollisionHistory(t *testing.T) {
 	db.Set("history-a", "a-v2")
 	db.Set("history-b", "b-v1")
 
-	histA, _ := db.History("history-a")
-	histB, _ := db.History("history-b")
+	histA, _ := collect(db.History("history-a"))
+	histB, _ := collect(db.History("history-b"))
 
 	if len(histA) != 2 {
 		t.Errorf("History(history-a) = %d versions, want 2", len(histA))
@@ -202,13 +202,13 @@ func TestManyDocumentsDifferentLabels(t *testing.T) {
 	db := openTestDB(t)
 
 	// Create many documents
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		label := string(rune('a'+i%26)) + string(rune('0'+i/26))
 		db.Set(label, "content-"+label)
 	}
 
 	// All should be retrievable
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		label := string(rune('a'+i%26)) + string(rune('0'+i/26))
 		data, err := db.Get(label)
 		if err != nil {
@@ -229,14 +229,14 @@ func TestManyDocumentsDifferentLabels(t *testing.T) {
 func TestManyDocumentsAfterCompact(t *testing.T) {
 	db := openTestDB(t)
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		label := string(rune('a'+i%26)) + string(rune('0'+i/26))
 		db.Set(label, "content-"+label)
 	}
 
 	db.Compact()
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		label := string(rune('a'+i%26)) + string(rune('0'+i/26))
 		data, err := db.Get(label)
 		if err != nil {

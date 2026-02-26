@@ -18,9 +18,10 @@ package folio
 import (
 	"bytes"
 	"encoding/hex"
-	json "github.com/goccy/go-json"
 	"time"
 	"unicode/utf8"
+
+	json "github.com/goccy/go-json"
 )
 
 // Record type markers. These appear as the first value in every JSON line
@@ -31,7 +32,7 @@ const (
 	TypeHistory = 3
 )
 
-const MaxLabelSize = 256              // bytes
+const MaxLabelSize = 256               // bytes
 const MaxRecordSize = 16 * 1024 * 1024 // 16MB, bounds scanner buffer allocation
 
 // Record is a data or history line. When a document is updated, the old
@@ -73,8 +74,8 @@ type Entry struct {
 	ID     string
 	TS     int64
 	Type   int
-	SrcOff int64  // position in the source file
-	DstOff int64  // position in the compaction output (set during write)
+	SrcOff int64 // position in the source file
+	DstOff int64 // position in the compaction output (set during write)
 	Length int
 	Label  string // populated only for index entries
 }

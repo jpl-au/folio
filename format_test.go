@@ -12,10 +12,11 @@
 package folio
 
 import (
-	json "github.com/goccy/go-json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	json "github.com/goccy/go-json"
 )
 
 // dbsize is a test helper that returns the database file size.

@@ -330,7 +330,7 @@ func TestHistoryCorruptRecord(t *testing.T) {
 
 	db.writeAt(HeaderSize+34, []byte("!!!!"))
 
-	_, err := db.History("doc")
+	_, err := collect(db.History("doc"))
 	if !errors.Is(err, ErrCorruptRecord) {
 		t.Errorf("got %v, want ErrCorruptRecord", err)
 	}
@@ -358,7 +358,7 @@ func TestHistoryCorruptHistory(t *testing.T) {
 	}
 	db.writeAt(HeaderSize+int64(i)+6, []byte("AAAAA"))
 
-	_, err := db.History("doc")
+	_, err := collect(db.History("doc"))
 	if !errors.Is(err, ErrDecompress) {
 		t.Errorf("got %v, want ErrDecompress", err)
 	}
@@ -385,7 +385,7 @@ func TestHistoryCorruptLabel(t *testing.T) {
 	// Overwrite "doc" with "zzz" — same length, different label.
 	db.writeAt(HeaderSize+int64(i)+6, []byte("zzz"))
 
-	versions, err := db.History("doc")
+	versions, err := collect(db.History("doc"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestHistoryCorruptType(t *testing.T) {
 	// Byte 7 of the record is the type digit. Change '2' to '1'.
 	db.writeAt(HeaderSize+7, []byte("1"))
 
-	versions, err := db.History("doc")
+	versions, err := collect(db.History("doc"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -437,7 +437,7 @@ func TestGroupSkipsInvalidRecord(t *testing.T) {
 	// false, so group() skips it. The second record (v2) is untouched.
 	db.writeAt(HeaderSize, []byte(" "))
 
-	versions, err := db.History("doc")
+	versions, err := collect(db.History("doc"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestListCorruptIndex(t *testing.T) {
 	bad := fmt.Sprintf(`{"idx":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"doc2"}`, id)
 	db.raw([]byte(bad))
 
-	_, err := db.List()
+	_, err := collect(db.List())
 	if !errors.Is(err, ErrCorruptIndex) {
 		t.Errorf("got %v, want ErrCorruptIndex", err)
 	}

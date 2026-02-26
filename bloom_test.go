@@ -65,13 +65,13 @@ func TestBloomReset(t *testing.T) {
 // often and provide negligible speedup.
 func TestBloomFPRate(t *testing.T) {
 	b := newBloom()
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		b.Add("present-" + strconv.Itoa(i))
 	}
 
 	fp := 0
 	tests := 10000
-	for i := 0; i < tests; i++ {
+	for i := range tests {
 		if b.Contains("absent-" + strconv.Itoa(i)) {
 			fp++
 		}

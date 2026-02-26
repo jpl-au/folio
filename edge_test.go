@@ -97,7 +97,7 @@ func TestFreshDatabaseEdgeCases(t *testing.T) {
 	}
 
 	// List on empty
-	labels, _ := db.List()
+	labels, _ := collect(db.List())
 	if len(labels) != 0 {
 		t.Errorf("List on empty: got %d, want 0", len(labels))
 	}
@@ -109,7 +109,7 @@ func TestFreshDatabaseEdgeCases(t *testing.T) {
 	}
 
 	// History on empty
-	versions, _ := db.History("nonexistent")
+	versions, _ := collect(db.History("nonexistent"))
 	if len(versions) != 0 {
 		t.Errorf("History on empty: got %d, want 0", len(versions))
 	}
@@ -258,12 +258,12 @@ func TestOperationsAfterClose(t *testing.T) {
 		t.Errorf("Exists after close: got %v, want ErrClosed", err)
 	}
 
-	_, err = db.List()
+	_, err = collect(db.List())
 	if err != ErrClosed {
 		t.Errorf("List after close: got %v, want ErrClosed", err)
 	}
 
-	_, err = db.History("doc")
+	_, err = collect(db.History("doc"))
 	if err != ErrClosed {
 		t.Errorf("History after close: got %v, want ErrClosed", err)
 	}
@@ -343,7 +343,7 @@ func TestHistoryAfterCompact(t *testing.T) {
 	db.Set("doc", "v3")
 	db.Compact()
 
-	versions, err := db.History("doc")
+	versions, err := collect(db.History("doc"))
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestHistoryMixedRegions(t *testing.T) {
 	db.Compact()
 	db.Set("doc", "v3")
 
-	versions, err := db.History("doc")
+	versions, err := collect(db.History("doc"))
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestSetUpdateSorted(t *testing.T) {
 		t.Errorf("Get = %q, want %q", data, "v2")
 	}
 
-	versions, _ := db.History("doc")
+	versions, _ := collect(db.History("doc"))
 	if len(versions) != 2 {
 		t.Errorf("History: got %d, want 2", len(versions))
 	}

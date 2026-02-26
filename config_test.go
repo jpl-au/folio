@@ -47,7 +47,7 @@ func TestConfigHashAlgorithm(t *testing.T) {
 		alg  int
 		want int
 	}{
-		{0, AlgXXHash3},         // Default
+		{0, AlgXXHash3}, // Default
 		{AlgXXHash3, AlgXXHash3},
 		{AlgFNV1a, AlgFNV1a},
 		{AlgBlake2b, AlgBlake2b},

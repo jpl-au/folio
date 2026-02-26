@@ -18,7 +18,7 @@ import (
 type LockMode int
 
 const (
-	LockShared    LockMode = iota
+	LockShared LockMode = iota
 	LockExclusive
 )
 

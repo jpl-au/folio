@@ -79,9 +79,13 @@ func ExampleDB_History() {
 	db.Set("doc", "Version 3")
 
 	// Retrieve all versions (oldest first)
-	versions, _ := db.History("doc")
-	for i, v := range versions {
-		fmt.Printf("v%d: %s\n", i+1, v.Data)
+	i := 0
+	for v, err := range db.History("doc") {
+		if err != nil {
+			log.Fatal(err)
+		}
+		i++
+		fmt.Printf("v%d: %s\n", i, v.Data)
 	}
 	// Output: v1: Version 1
 	// v2: Version 2
@@ -99,8 +103,14 @@ func ExampleDB_List() {
 	db.Set("banana", "Another fruit")
 	db.Set("carrot", "A vegetable")
 
-	labels, _ := db.List()
-	fmt.Printf("Documents: %d\n", len(labels))
+	count := 0
+	for _, err := range db.List() {
+		if err != nil {
+			log.Fatal(err)
+		}
+		count++
+	}
+	fmt.Printf("Documents: %d\n", count)
 	// Output: Documents: 3
 }
 
@@ -129,7 +139,7 @@ func ExampleDB_Compact() {
 	defer db.Close()
 
 	// After many writes, compact reorganises for faster reads
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		db.Set("counter", fmt.Sprintf("%d", i))
 	}
 
@@ -151,8 +161,14 @@ func ExampleDB_Search() {
 	db.Set("changelog", "# Changelog\n\n## v1.0\n- Initial release")
 
 	// Search file content with regex
-	matches, _ := db.Search("README", folio.SearchOptions{})
-	fmt.Printf("Matches: %d\n", len(matches))
+	count := 0
+	for _, err := range db.Search("README", folio.SearchOptions{}) {
+		if err != nil {
+			log.Fatal(err)
+		}
+		count++
+	}
+	fmt.Printf("Matches: %d\n", count)
 }
 
 func ExampleConfig() {
@@ -162,9 +178,9 @@ func ExampleConfig() {
 	// Custom configuration
 	cfg := folio.Config{
 		HashAlgorithm: folio.AlgXXHash3, // Default, fastest
-		SyncWrites:    true,              // fsync after each write
-		ReadBuffer:    128 * 1024,        // 128KB read buffer
-		MaxRecordSize: 32 * 1024 * 1024,  // 32MB max record
+		SyncWrites:    true,             // fsync after each write
+		ReadBuffer:    128 * 1024,       // 128KB read buffer
+		MaxRecordSize: 32 * 1024 * 1024, // 32MB max record
 	}
 
 	db, _ := folio.Open(filepath.Join(dir, "custom.folio"), cfg)

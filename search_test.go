@@ -31,7 +31,7 @@ func TestSearchMatchFound(t *testing.T) {
 
 	db.Set("doc", "hello world")
 
-	matches, err := db.Search("hello", SearchOptions{})
+	matches, err := collect(db.Search("hello", SearchOptions{}))
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestSearchNoMatch(t *testing.T) {
 
 	db.Set("doc", "hello world")
 
-	matches, _ := db.Search("xyz", SearchOptions{})
+	matches, _ := collect(db.Search("xyz", SearchOptions{}))
 	if len(matches) != 0 {
 		t.Errorf("expected no matches, got %d", len(matches))
 	}
@@ -63,7 +63,7 @@ func TestSearchCaseInsensitiveDefault(t *testing.T) {
 
 	db.Set("doc", "Hello World")
 
-	matches, _ := db.Search("HELLO", SearchOptions{})
+	matches, _ := collect(db.Search("HELLO", SearchOptions{}))
 	if len(matches) == 0 {
 		t.Error("case insensitive search should match")
 	}
@@ -78,29 +78,39 @@ func TestSearchCaseSensitive(t *testing.T) {
 
 	db.Set("doc", "Hello World")
 
-	matches, _ := db.Search("HELLO", SearchOptions{CaseSensitive: true})
+	matches, _ := collect(db.Search("HELLO", SearchOptions{CaseSensitive: true}))
 	if len(matches) != 0 {
 		t.Error("case sensitive search should not match")
 	}
 
-	matches, _ = db.Search("Hello", SearchOptions{CaseSensitive: true})
+	matches, _ = collect(db.Search("Hello", SearchOptions{CaseSensitive: true}))
 	if len(matches) == 0 {
 		t.Error("case sensitive search should match exact case")
 	}
 }
 
-// TestSearchLimit verifies that the Limit option caps the number of
-// results. Without a limit, Search would scan the entire file even when
-// the caller only needs the first few matches — a waste of time for
-// large databases.
-func TestSearchLimit(t *testing.T) {
+// TestSearchEarlyBreak verifies that breaking out of the range loop
+// stops the scan without consuming all results. The caller controls
+// result count by breaking — no Limit option needed.
+func TestSearchEarlyBreak(t *testing.T) {
 	db := openTestDB(t)
 
-	db.Set("doc", "abc abc abc abc abc")
+	db.Set("a", "abc")
+	db.Set("b", "abc")
+	db.Set("c", "abc")
 
-	matches, _ := db.Search("abc", SearchOptions{Limit: 2})
-	if len(matches) > 2 {
-		t.Errorf("limit not respected: got %d matches", len(matches))
+	var count int
+	for _, err := range db.Search("abc", SearchOptions{}) {
+		if err != nil {
+			t.Fatalf("Search: %v", err)
+		}
+		count++
+		if count >= 2 {
+			break
+		}
+	}
+	if count != 2 {
+		t.Errorf("expected 2 results before break, got %d", count)
 	}
 }
 
@@ -112,7 +122,7 @@ func TestSearchRegex(t *testing.T) {
 
 	db.Set("doc", "hello world")
 
-	matches, _ := db.Search("hel.*rld", SearchOptions{})
+	matches, _ := collect(db.Search("hel.*rld", SearchOptions{}))
 	if len(matches) == 0 {
 		t.Error("regex should match")
 	}
@@ -127,7 +137,7 @@ func TestSearchInvalidRegex(t *testing.T) {
 
 	db.Set("doc", "content")
 
-	_, err := db.Search("[invalid", SearchOptions{})
+	_, err := collect(db.Search("[invalid", SearchOptions{}))
 	if err != ErrInvalidPattern {
 		t.Errorf("expected ErrInvalidPattern, got %v", err)
 	}
@@ -141,7 +151,7 @@ func TestSearchClosed(t *testing.T) {
 	db.Set("doc", "content")
 	db.Close()
 
-	_, err := db.Search("content", SearchOptions{})
+	_, err := collect(db.Search("content", SearchOptions{}))
 	if err != ErrClosed {
 		t.Errorf("expected ErrClosed, got %v", err)
 	}
@@ -156,7 +166,7 @@ func TestMatchLabelFound(t *testing.T) {
 
 	db.Set("my-app", "content")
 
-	matches, err := db.MatchLabel("app")
+	matches, err := collect(db.MatchLabel("app"))
 	if err != nil {
 		t.Fatalf("MatchLabel: %v", err)
 	}
@@ -175,7 +185,7 @@ func TestMatchLabelNoMatch(t *testing.T) {
 
 	db.Set("my-app", "content")
 
-	matches, _ := db.MatchLabel("xyz")
+	matches, _ := collect(db.MatchLabel("xyz"))
 	if len(matches) != 0 {
 		t.Errorf("expected no matches, got %d", len(matches))
 	}
@@ -188,7 +198,7 @@ func TestMatchLabelCaseInsensitive(t *testing.T) {
 
 	db.Set("MyApp", "content")
 
-	matches, _ := db.MatchLabel("myapp")
+	matches, _ := collect(db.MatchLabel("myapp"))
 	if len(matches) == 0 {
 		t.Error("case insensitive match should work")
 	}
@@ -201,7 +211,7 @@ func TestMatchLabelInvalidRegex(t *testing.T) {
 
 	db.Set("doc", "content")
 
-	_, err := db.MatchLabel("(?P<invalid")
+	_, err := collect(db.MatchLabel("(?P<invalid"))
 	if err != ErrInvalidPattern {
 		t.Errorf("expected ErrInvalidPattern, got %v", err)
 	}
@@ -214,7 +224,7 @@ func TestMatchLabelClosed(t *testing.T) {
 	db.Set("doc", "content")
 	db.Close()
 
-	_, err := db.MatchLabel("doc")
+	_, err := collect(db.MatchLabel("doc"))
 	if err != ErrClosed {
 		t.Errorf("expected ErrClosed, got %v", err)
 	}
@@ -231,7 +241,7 @@ func TestMatchLabelMultiple(t *testing.T) {
 	db.Set("app-two", "content2")
 	db.Set("other", "content3")
 
-	matches, _ := db.MatchLabel("app")
+	matches, _ := collect(db.MatchLabel("app"))
 	if len(matches) != 2 {
 		t.Errorf("expected 2 matches, got %d", len(matches))
 	}
@@ -249,7 +259,7 @@ func TestSearchDecodeQuotes(t *testing.T) {
 	db.Set("doc", `hello "world"`)
 
 	// With Decode, the unescaped quotes should be searchable.
-	matches, err := db.Search(`"world"`, SearchOptions{Decode: true})
+	matches, err := collect(db.Search(`"world"`, SearchOptions{Decode: true}))
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -259,7 +269,7 @@ func TestSearchDecodeQuotes(t *testing.T) {
 
 	// Without Decode, the literal fast path JSON-escapes the query
 	// so it matches the raw \" sequences directly.
-	matches, _ = db.Search(`"world"`, SearchOptions{})
+	matches, _ = collect(db.Search(`"world"`, SearchOptions{}))
 	if len(matches) == 0 {
 		t.Error("literal search should match quoted content via escaped query")
 	}
@@ -278,13 +288,13 @@ func TestSearchRegexDecodeQuotes(t *testing.T) {
 
 	// Regex path (pattern has metacharacter) without Decode cannot match
 	// literal quotes because the raw JSON has escaped quotes (\").
-	matches, _ := db.Search(`"wor.d"`, SearchOptions{})
+	matches, _ := collect(db.Search(`"wor.d"`, SearchOptions{}))
 	if len(matches) != 0 {
 		t.Error("regex on raw JSON should not match literal quotes")
 	}
 
 	// With Decode, the unescaped content is matched.
-	matches, _ = db.Search(`"wor.d"`, SearchOptions{Decode: true})
+	matches, _ = collect(db.Search(`"wor.d"`, SearchOptions{Decode: true}))
 	if len(matches) == 0 {
 		t.Error("regex with decode should match quoted content")
 	}
@@ -302,7 +312,7 @@ func TestSearchLiteralNewline(t *testing.T) {
 
 	// Literal path: the newline in the pattern is JSON-escaped to \n
 	// and matched against the raw JSON bytes without unescaping content.
-	matches, err := db.Search("line1\nline2", SearchOptions{})
+	matches, err := collect(db.Search("line1\nline2", SearchOptions{}))
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -321,13 +331,13 @@ func TestSearchBothPathsNewline(t *testing.T) {
 	db.Set("doc", "line1\nline2")
 
 	// Literal path: "line1" has no metacharacters.
-	matches, _ := db.Search("line1", SearchOptions{})
+	matches, _ := collect(db.Search("line1", SearchOptions{}))
 	if len(matches) == 0 {
 		t.Error("literal path should match substring in newline content")
 	}
 
 	// Regex path: "line." has a metacharacter.
-	matches, _ = db.Search("line.", SearchOptions{})
+	matches, _ = collect(db.Search("line.", SearchOptions{}))
 	if len(matches) == 0 {
 		t.Error("regex path should match pattern in newline content")
 	}
@@ -342,13 +352,13 @@ func TestSearchBothPathsQuotes(t *testing.T) {
 	db.Set("doc", `say "hello" please`)
 
 	// Literal path: `"hello"` has no regex metacharacters (quote is not one).
-	matches, _ := db.Search(`"hello"`, SearchOptions{})
+	matches, _ := collect(db.Search(`"hello"`, SearchOptions{}))
 	if len(matches) == 0 {
 		t.Error("literal path should match quoted substring")
 	}
 
 	// Regex path: `"hel.o"` has a metacharacter.
-	matches, _ = db.Search(`"hel.o"`, SearchOptions{Decode: true})
+	matches, _ = collect(db.Search(`"hel.o"`, SearchOptions{Decode: true}))
 	if len(matches) == 0 {
 		t.Error("regex path with decode should match quoted content")
 	}
@@ -364,7 +374,7 @@ func TestSearchDecodePlain(t *testing.T) {
 	db.Set("doc", "hello world")
 
 	// Decode on plain content (fast path, no escapes) should still match.
-	matches, err := db.Search("hello", SearchOptions{Decode: true})
+	matches, err := collect(db.Search("hello", SearchOptions{Decode: true}))
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -383,7 +393,7 @@ func TestSearchDecodeBackslash(t *testing.T) {
 
 	db.Set("doc", `path\to\file`)
 
-	matches, err := db.Search(`path\\to`, SearchOptions{Decode: true})
+	matches, err := collect(db.Search(`path\\to`, SearchOptions{Decode: true}))
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -402,7 +412,7 @@ func TestSearchDecodeNewline(t *testing.T) {
 	db.Set("doc", "line1\nline2")
 
 	// Search for the literal newline character in decoded content.
-	matches, err := db.Search("line1\nline2", SearchOptions{Decode: true})
+	matches, err := collect(db.Search("line1\nline2", SearchOptions{Decode: true}))
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

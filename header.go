@@ -7,8 +7,9 @@ package folio
 
 import (
 	"bytes"
-	json "github.com/goccy/go-json"
 	"os"
+
+	json "github.com/goccy/go-json"
 )
 
 // HeaderSize is fixed so the dirty flag can be patched at a known byte

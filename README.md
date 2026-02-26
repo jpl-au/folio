@@ -60,13 +60,23 @@ func main() {
     }
     fmt.Println(content) // "Hello, World!"
 
-    labels, err := db.List()             // all document labels
-    matches, err := db.Search("Hello", folio.SearchOptions{})  // regex on content
-    versions, err := db.History("my-doc") // all previous versions
+    // Iterate over labels, search results, and history
+    for label, err := range db.List() {
+        if err != nil { log.Fatal(err) }
+        fmt.Println(label)
+    }
+
+    for match, err := range db.Search("Hello", folio.SearchOptions{}) {
+        if err != nil { log.Fatal(err) }
+        fmt.Println(match.Label)
+    }
+
+    for version, err := range db.History("my-doc") {
+        if err != nil { log.Fatal(err) }
+        fmt.Println(version.Data)
+    }
 }
 ```
-
-> Error handling omitted for brevity. All methods return errors that should be checked.
 
 ## File Format
 
@@ -97,15 +107,19 @@ db.Set(label, content string) error          // Create or update
 db.Get(label string) (string, error)         // Retrieve content by label
 db.Delete(label string) error                // Soft delete (preserves history)
 db.Exists(label string) (bool, error)        // Check existence
-db.List() ([]string, error)                  // All labels
 ```
 
-### Search and History
+### Iterators
+
+Search, List, MatchLabel, and History return `iter.Seq2` iterators. Results
+stream lazily — break from the range loop to stop early without scanning the
+rest of the file.
 
 ```go
-db.Search(pattern string, opts SearchOptions) ([]Match, error)   // Pattern match on content
-db.MatchLabel(pattern string) ([]Match, error)                   // Regex on labels
-db.History(label string) ([]Version, error)                      // All versions
+db.List() iter.Seq2[string, error]                               // All labels
+db.Search(pattern string, opts SearchOptions) iter.Seq2[Match, error]   // Pattern match on content
+db.MatchLabel(pattern string) iter.Seq2[Match, error]                   // Regex on labels
+db.History(label string) iter.Seq2[Version, error]                      // All versions
 ```
 
 Search uses a literal fast path for patterns without regex metacharacters:

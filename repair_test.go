@@ -62,7 +62,7 @@ func TestRepairPreservesHistory(t *testing.T) {
 
 	db.Repair(nil)
 
-	versions, _ := db.History("doc")
+	versions, _ := collect(db.History("doc"))
 	if len(versions) != 3 {
 		t.Errorf("History: got %d versions, want 3", len(versions))
 	}
@@ -82,7 +82,7 @@ func TestRepairWithPurgeHistory(t *testing.T) {
 
 	db.Repair(&CompactOptions{PurgeHistory: true})
 
-	versions, _ := db.History("doc")
+	versions, _ := collect(db.History("doc"))
 	if len(versions) != 1 {
 		t.Errorf("History after purge: got %d versions, want 1", len(versions))
 	}
@@ -167,7 +167,7 @@ func TestCompactPreservesHistory(t *testing.T) {
 
 	db.Compact()
 
-	versions, _ := db.History("doc")
+	versions, _ := collect(db.History("doc"))
 	if len(versions) != 2 {
 		t.Errorf("History after Compact: got %d, want 2", len(versions))
 	}
@@ -187,7 +187,7 @@ func TestPurgeRemovesHistory(t *testing.T) {
 
 	db.Purge()
 
-	versions, _ := db.History("doc")
+	versions, _ := collect(db.History("doc"))
 	if len(versions) != 1 {
 		t.Errorf("History after Purge: got %d, want 1", len(versions))
 	}
@@ -290,7 +290,7 @@ func TestRepairBlockReaders(t *testing.T) {
 		t.Errorf("Get(b) = %q, want %q", data, "content-b")
 	}
 
-	versions, _ := db.History("a")
+	versions, _ := collect(db.History("a"))
 	if len(versions) != 2 {
 		t.Errorf("History(a): got %d, want 2", len(versions))
 	}
@@ -317,7 +317,7 @@ func TestRepairBlockReadersPurge(t *testing.T) {
 		t.Errorf("Get = %q, want %q", data, "v3")
 	}
 
-	versions, _ := db.History("doc")
+	versions, _ := collect(db.History("doc"))
 	if len(versions) != 1 {
 		t.Errorf("History: got %d, want 1", len(versions))
 	}
