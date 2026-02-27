@@ -26,31 +26,6 @@ db.Set("my-doc", "Hello, World!")
 content, _ := db.Get("my-doc")
 ```
 
-## Design
-
-Folio is optimised for **short-lived processes** — a CLI tool or script
-that opens a file, reads or writes, and closes. All state lives on disk:
-no in-memory indexes survive between invocations, no background threads,
-no caches beyond an optional bloom filter built fresh at `Open`. Every
-operation works by streaming the file or seeking to known byte positions.
-
-This is deliberate. Features you might expect from a long-running database
-— event systems, subscription channels, persistent in-memory indexes,
-write-behind caches — are absent because the current design target does
-not benefit from them. A process that opens a file for one lookup and
-closes it would pay the cost of building these structures without ever
-recouping the investment.
-
-The roadmap has three phases:
-
-1. **Short-lived processes** (current) — disk I/O is the critical path.
-   Open, operate, close. No persistent memory structures.
-2. **Bridging** — features useful to both short-lived and long-running
-   processes, such as memory-mapped I/O and batch writes.
-3. **Long-running processes** — memory-oriented features where a process
-   holds the database open for an extended period: cached statistics,
-   event hooks, watch/subscribe.
-
 ## Install
 
 ```bash
@@ -129,7 +104,7 @@ See [USAGE.md](USAGE.md) for command-line examples and
 
 ```go
 db.Set(label, content string) error          // Create or update
-db.Batch(docs ...Document) error           // Batch create or update
+db.Batch(docs ...Document) error             // Batch create or update
 db.Get(label string) (string, error)         // Retrieve content by label
 db.Delete(label string) error                // Soft delete (preserves history)
 db.Exists(label string) (bool, error)        // Check existence
@@ -192,6 +167,31 @@ Lookups for absent documents skip the linear scan entirely.
 - [AGENTS.md](AGENTS.md) - Quick orientation for LLM agents and tool integrations
 - [USAGE.md](USAGE.md) - Command-line usage and grep examples
 - [PORTING.md](PORTING.md) - Format specification and implementation guide
+
+## Design
+
+Folio is optimised for **short-lived processes** — a CLI tool or script
+that opens a file, reads or writes, and closes. All state lives on disk:
+no in-memory indexes survive between invocations, no background threads,
+no caches beyond an optional bloom filter built fresh at `Open`. Every
+operation works by streaming the file or seeking to known byte positions.
+
+This is deliberate. Features you might expect from a long-running database
+— event systems, subscription channels, persistent in-memory indexes,
+write-behind caches — are absent because the current design target does
+not benefit from them. A process that opens a file for one lookup and
+closes it would pay the cost of building these structures without ever
+recouping the investment.
+
+The roadmap has three phases:
+
+1. **Short-lived processes** (current) — disk I/O is the critical path.
+   Open, operate, close. No persistent memory structures.
+2. **Bridging** — features useful to both short-lived and long-running
+   processes, such as memory-mapped I/O and batch writes.
+3. **Long-running processes** — memory-oriented features where a process
+   holds the database open for an extended period: cached statistics,
+   event hooks, watch/subscribe.
 
 ## License
 
