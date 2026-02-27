@@ -137,12 +137,13 @@ db.Exists(label string) (bool, error)        // Check existence
 
 ### Iterators
 
-Search, List, MatchLabel, and History return `iter.Seq2` iterators. Results
+All, Search, List, MatchLabel, and History return `iter.Seq2` iterators. Results
 stream lazily — break from the range loop to stop early without scanning the
 rest of the file.
 
 ```go
-db.List() iter.Seq2[string, error]                               // All labels
+db.All() iter.Seq2[Document, error]                                     // All label–content pairs
+db.List() iter.Seq2[string, error]                                      // All labels
 db.Search(pattern string, opts SearchOptions) iter.Seq2[Match, error]   // Pattern match on content
 db.MatchLabel(pattern string) iter.Seq2[Match, error]                   // Regex on labels
 db.History(label string) iter.Seq2[Version, error]                      // All versions

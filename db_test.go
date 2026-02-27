@@ -367,6 +367,148 @@ func TestListAfterDelete(t *testing.T) {
 	}
 }
 
+// TestAll verifies that All returns every document with correct content.
+// This is the single-pass alternative to List+Get — if All missed any
+// document or returned wrong content, export and backup use cases would
+// produce incomplete or corrupt output.
+func TestAll(t *testing.T) {
+	db := openTestDB(t)
+
+	docs, _ := collect(db.All())
+	if len(docs) != 0 {
+		t.Errorf("All empty db: got %d, want 0", len(docs))
+	}
+
+	db.Set("a", "alpha")
+	db.Set("b", "bravo")
+	db.Set("c", "charlie")
+
+	docs, _ = collect(db.All())
+	if len(docs) != 3 {
+		t.Errorf("All: got %d docs, want 3", len(docs))
+	}
+
+	got := make(map[string]string)
+	for _, d := range docs {
+		got[d.Label] = d.Data
+	}
+	for _, want := range []struct{ label, data string }{
+		{"a", "alpha"}, {"b", "bravo"}, {"c", "charlie"},
+	} {
+		if got[want.label] != want.data {
+			t.Errorf("All[%s] = %q, want %q", want.label, got[want.label], want.data)
+		}
+	}
+}
+
+// TestAllAfterUpdate verifies that All returns only the latest version
+// of each document. Set retypes old data records from 2→3, so the type
+// check at TypePos must exclude them. If it didn't, All would yield
+// stale content alongside the current version.
+func TestAllAfterUpdate(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", "v1")
+	db.Set("doc", "v2")
+
+	docs, _ := collect(db.All())
+	if len(docs) != 1 {
+		t.Fatalf("All after update: got %d, want 1", len(docs))
+	}
+	if docs[0].Data != "v2" {
+		t.Errorf("All[0].Data = %q, want %q", docs[0].Data, "v2")
+	}
+}
+
+// TestAllAfterDelete verifies that deleted documents are excluded from
+// All results. Delete retypes the data record to history and blanks _d,
+// so the type check skips it. If All returned deleted documents, callers
+// would see phantom entries with blank content.
+func TestAllAfterDelete(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("a", "1")
+	db.Set("b", "2")
+	db.Delete("a")
+
+	docs, _ := collect(db.All())
+	if len(docs) != 1 {
+		t.Fatalf("All after delete: got %d, want 1", len(docs))
+	}
+	if docs[0].Label != "b" {
+		t.Errorf("All[0].Label = %q, want %q", docs[0].Label, "b")
+	}
+}
+
+// TestAllAfterCompact verifies that All works after compaction moves
+// records from sparse into the sorted heap. Compaction rewrites byte
+// offsets; if the scan boundaries (heapEnd, sparseStart) were stale,
+// All would scan the wrong regions and miss documents.
+func TestAllAfterCompact(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("a", "alpha")
+	db.Set("b", "bravo")
+	db.Set("a", "updated")
+	db.Compact()
+
+	docs, _ := collect(db.All())
+	if len(docs) != 2 {
+		t.Fatalf("All after compact: got %d, want 2", len(docs))
+	}
+
+	got := make(map[string]string)
+	for _, d := range docs {
+		got[d.Label] = d.Data
+	}
+	if got["a"] != "updated" {
+		t.Errorf("All[a] = %q, want %q", got["a"], "updated")
+	}
+	if got["b"] != "bravo" {
+		t.Errorf("All[b] = %q, want %q", got["b"], "bravo")
+	}
+}
+
+// TestAllEscapedContent verifies that All correctly unescapes JSON
+// string escapes in _d content. Content with newlines, quotes, or
+// backslashes is JSON-encoded on disk; All must return the original
+// content, not the escaped representation.
+func TestAllEscapedContent(t *testing.T) {
+	db := openTestDB(t)
+
+	content := "line1\nline2\ttab\"quote\\backslash"
+	db.Set("escaped", content)
+
+	docs, _ := collect(db.All())
+	if len(docs) != 1 {
+		t.Fatalf("All escaped: got %d, want 1", len(docs))
+	}
+	if docs[0].Data != content {
+		t.Errorf("All[0].Data = %q, want %q", docs[0].Data, content)
+	}
+}
+
+// TestAllEarlyBreak verifies that breaking from the range loop stops
+// the scan without reading the rest of the file. If the iterator didn't
+// respect the break, it would waste I/O scanning records that the
+// caller will never see.
+func TestAllEarlyBreak(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("a", "1")
+	db.Set("b", "2")
+	db.Set("c", "3")
+
+	var count int
+	for range db.All() {
+		count++
+		break
+	}
+	if count != 1 {
+		t.Errorf("All early break: got %d, want 1", count)
+	}
+}
+
 // TestHistoryMultiDocCompact verifies that History returns the correct
 // versions when multiple documents are interleaved in the heap after
 // compaction. The group() function walks forward through the sorted
