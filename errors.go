@@ -19,6 +19,7 @@ import "errors"
 // (ErrCorruptHeader, ErrCorruptRecord, ErrCorruptIndex, ErrDecompress).
 var (
 	ErrNotFound       = errors.New("document not found")
+	ErrExists         = errors.New("document already exists")
 	ErrLabelTooLong   = errors.New("label exceeds maximum size")
 	ErrInvalidLabel   = errors.New("label contains invalid characters")
 	ErrEmptyContent   = errors.New("content cannot be empty")

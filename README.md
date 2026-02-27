@@ -133,6 +133,7 @@ db.Set(label, content string) error          // Create or update
 db.Get(label string) (string, error)         // Retrieve content by label
 db.Delete(label string) error                // Soft delete (preserves history)
 db.Exists(label string) (bool, error)        // Check existence
+db.Rename(old, new string) error             // Change a document's label
 ```
 
 ### Iterators

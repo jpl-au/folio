@@ -509,6 +509,149 @@ func TestAllEarlyBreak(t *testing.T) {
 	}
 }
 
+// TestRenameSameLength verifies the in-place patch path: when old and
+// new labels have the same byte length, Rename patches _id and _l
+// directly without creating a new record. Get(old) must return
+// ErrNotFound and Get(new) must return the original content.
+func TestRenameSameLength(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("aaa", "content")
+	if err := db.Rename("aaa", "bbb"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	_, err := db.Get("aaa")
+	if err != ErrNotFound {
+		t.Errorf("Get(old) = %v, want ErrNotFound", err)
+	}
+
+	data, err := db.Get("bbb")
+	if err != nil {
+		t.Fatalf("Get(new): %v", err)
+	}
+	if data != "content" {
+		t.Errorf("Get(new) = %q, want %q", data, "content")
+	}
+}
+
+// TestRenameDifferentLength verifies the fallback path: when labels
+// differ in length, Rename appends a new record+index and blanks the
+// old ones. The content must survive and be accessible under the new
+// label.
+func TestRenameDifferentLength(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("short", "content")
+	if err := db.Rename("short", "much-longer-label"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	_, err := db.Get("short")
+	if err != ErrNotFound {
+		t.Errorf("Get(old) = %v, want ErrNotFound", err)
+	}
+
+	data, err := db.Get("much-longer-label")
+	if err != nil {
+		t.Fatalf("Get(new): %v", err)
+	}
+	if data != "content" {
+		t.Errorf("Get(new) = %q, want %q", data, "content")
+	}
+}
+
+// TestRenameNotFound verifies that renaming a nonexistent document
+// returns ErrNotFound.
+func TestRenameNotFound(t *testing.T) {
+	db := openTestDB(t)
+
+	err := db.Rename("nonexistent", "new")
+	if err != ErrNotFound {
+		t.Errorf("Rename missing: got %v, want ErrNotFound", err)
+	}
+}
+
+// TestRenameExists verifies that renaming to an existing label returns
+// ErrExists rather than silently overwriting the target document.
+func TestRenameExists(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("a", "alpha")
+	db.Set("b", "bravo")
+
+	err := db.Rename("a", "b")
+	if err != ErrExists {
+		t.Errorf("Rename to existing: got %v, want ErrExists", err)
+	}
+
+	// Both documents should be unchanged.
+	data, _ := db.Get("a")
+	if data != "alpha" {
+		t.Errorf("Get(a) = %q, want %q", data, "alpha")
+	}
+	data, _ = db.Get("b")
+	if data != "bravo" {
+		t.Errorf("Get(b) = %q, want %q", data, "bravo")
+	}
+}
+
+// TestRenameSameLabel verifies that renaming to the same label is a
+// no-op that returns nil.
+func TestRenameSameLabel(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", "content")
+	if err := db.Rename("doc", "doc"); err != nil {
+		t.Errorf("Rename(same): %v", err)
+	}
+
+	data, _ := db.Get("doc")
+	if data != "content" {
+		t.Errorf("Get = %q, want %q", data, "content")
+	}
+}
+
+// TestRenameAfterCompact verifies that Rename works when the document
+// is in the sorted heap (post-compaction) rather than the sparse
+// region. The index lookup must use the sorted section's binary search
+// path.
+func TestRenameAfterCompact(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("old", "content")
+	db.Compact()
+
+	if err := db.Rename("old", "new"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	data, err := db.Get("new")
+	if err != nil {
+		t.Fatalf("Get(new): %v", err)
+	}
+	if data != "content" {
+		t.Errorf("Get(new) = %q, want %q", data, "content")
+	}
+}
+
+// TestRenameListReflects verifies that List returns the new label and
+// not the old one after a rename.
+func TestRenameListReflects(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("before", "content")
+	db.Rename("before", "after")
+
+	labels, _ := collect(db.List())
+	if len(labels) != 1 {
+		t.Fatalf("List: got %d, want 1", len(labels))
+	}
+	if labels[0] != "after" {
+		t.Errorf("List[0] = %q, want %q", labels[0], "after")
+	}
+}
+
 // TestHistoryMultiDocCompact verifies that History returns the correct
 // versions when multiple documents are interleaved in the heap after
 // compaction. The group() function walks forward through the sorted
