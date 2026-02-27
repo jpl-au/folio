@@ -729,6 +729,113 @@ func TestBatchEmpty(t *testing.T) {
 	}
 }
 
+// TestCount verifies that Count tracks creates and returns 0 for an
+// empty database. Count is maintained atomically by Set and Delete
+// and requires no I/O or locking.
+func TestCount(t *testing.T) {
+	db := openTestDB(t)
+
+	if db.Count() != 0 {
+		t.Errorf("Count empty = %d, want 0", db.Count())
+	}
+
+	db.Set("a", "1")
+	db.Set("b", "2")
+	db.Set("c", "3")
+
+	if db.Count() != 3 {
+		t.Errorf("Count = %d, want 3", db.Count())
+	}
+}
+
+// TestCountAfterUpdate verifies that updating a document does not
+// change the count. Set increments only for new labels; updates
+// replace content without creating a new document.
+func TestCountAfterUpdate(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", "v1")
+	db.Set("doc", "v2")
+	db.Set("doc", "v3")
+
+	if db.Count() != 1 {
+		t.Errorf("Count after updates = %d, want 1", db.Count())
+	}
+}
+
+// TestCountAfterDelete verifies that Count decrements on delete.
+func TestCountAfterDelete(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("a", "1")
+	db.Set("b", "2")
+	db.Delete("a")
+
+	if db.Count() != 1 {
+		t.Errorf("Count after delete = %d, want 1", db.Count())
+	}
+}
+
+// TestCountAfterCompact verifies that Compact corrects the count to
+// an accurate value derived from the index map.
+func TestCountAfterCompact(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("a", "1")
+	db.Set("b", "2")
+	db.Set("a", "updated")
+	db.Delete("b")
+	db.Set("c", "3")
+	db.Compact()
+
+	if db.Count() != 2 {
+		t.Errorf("Count after compact = %d, want 2", db.Count())
+	}
+}
+
+// TestCountPersistence verifies that the count survives close and
+// reopen. Close writes the full header (including _c) to disk; Open
+// reads it back and initialises the atomic counter.
+func TestCountPersistence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.folio")
+
+	db1, _ := Open(path, Config{})
+	db1.Set("a", "1")
+	db1.Set("b", "2")
+	db1.Set("c", "3")
+	db1.Close()
+
+	db2, err := Open(path, Config{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db2.Close()
+
+	if db2.Count() != 3 {
+		t.Errorf("Count after reopen = %d, want 3", db2.Count())
+	}
+}
+
+// TestCountAfterRename verifies that Rename does not change the count.
+// Renaming changes the label, not the number of documents.
+func TestCountAfterRename(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("old", "content")
+	db.Set("other", "data")
+
+	if db.Count() != 2 {
+		t.Errorf("Count before rename = %d, want 2", db.Count())
+	}
+
+	db.Rename("old", "new")
+
+	if db.Count() != 2 {
+		t.Errorf("Count after rename = %d, want 2", db.Count())
+	}
+}
+
 // TestHistoryMultiDocCompact verifies that History returns the correct
 // versions when multiple documents are interleaved in the heap after
 // compaction. The group() function walks forward through the sorted

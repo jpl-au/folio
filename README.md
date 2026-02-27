@@ -135,6 +135,7 @@ db.Get(label string) (string, error)         // Retrieve content by label
 db.Delete(label string) error                // Soft delete (preserves history)
 db.Exists(label string) (bool, error)        // Check existence
 db.Rename(old, new string) error             // Change a document's label
+db.Count() int                               // Document count (no I/O, lock-free)
 ```
 
 ### Iterators

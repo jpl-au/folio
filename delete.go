@@ -32,6 +32,7 @@ func (db *DB) Delete(label string) error {
 			if err := blank(db, idx.Offset, result); err != nil {
 				return fmt.Errorf("delete: %w", err)
 			}
+			db.count.Add(-1)
 			return nil
 		}
 	}
@@ -52,6 +53,7 @@ func (db *DB) Delete(label string) error {
 			if err := blank(db, idx.Offset, &result); err != nil {
 				return fmt.Errorf("delete: %w", err)
 			}
+			db.count.Add(-1)
 			return nil
 		}
 	}

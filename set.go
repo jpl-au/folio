@@ -118,6 +118,10 @@ func (db *DB) setOne(label, content string) error {
 		db.bloom.Add(id)
 	}
 
+	if idxResult == nil {
+		db.count.Add(1)
+	}
+
 	// Retire the previous version.
 	if idxResult != nil {
 		if err := blank(db, idx.Offset, idxResult); err != nil {

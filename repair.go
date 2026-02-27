@@ -129,6 +129,7 @@ func (db *DB) Repair(opts *CompactOptions) error {
 	db.writer = writer
 	db.lock.setFile(db.writer)
 	db.header = hdrParsed
+	db.count.Store(int64(hdrParsed.Count))
 	db.tail = indexEnd
 
 	if db.bloom != nil {
@@ -235,6 +236,7 @@ func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
 		Heap:      heapEnd,
 		Index:     indexEnd,
 		Error:     0,
+		Count:     len(indexMap),
 	}
 	hdrBytes, err := hdr.encode()
 	if err != nil {

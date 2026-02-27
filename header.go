@@ -34,6 +34,7 @@ type Header struct {
 	Timestamp int64 `json:"_ts"`  // Unix ms when this header was last written
 	Heap      int64 `json:"_h"`   // Byte offset where index section begins (end of heap)
 	Index     int64 `json:"_i"`   // Byte offset where sparse region begins
+	Count     int   `json:"_c"`   // Best-guess document count; corrected by Compact/Repair
 }
 
 // header parses the fixed-size header from byte 0 of the file.

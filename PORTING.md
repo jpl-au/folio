@@ -44,7 +44,7 @@ The first line is a JSON object, space-padded to exactly 127 bytes, followed
 by a newline (128 bytes total).
 
 ```json
-{"_v":2,"_e":0,"_alg":1,"_ts":1706000000000,"_h":0,"_d":0,"_i":0}
+{"_v":2,"_e":0,"_alg":1,"_ts":1706000000000,"_h":0,"_d":0,"_i":0,"_c":0}
 ```
 
 | Field  | Type | Description |
@@ -56,6 +56,7 @@ by a newline (128 bytes total).
 | `_h`   | int  | Byte offset: end of heap section |
 | `_d`   | int  | Reserved (0) |
 | `_i`   | int  | Byte offset: end of index section |
+| `_c`   | int  | Document count (best-guess, corrected by compaction) |
 
 The dirty flag (`_e`) sits at a known byte position (offset 13 in the line)
 so it can be toggled with a single-byte write rather than rewriting the

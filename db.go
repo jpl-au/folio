@@ -60,6 +60,7 @@ type DB struct {
 	config Config
 	bloom  *bloom // nil unless Config.BloomFilter is set
 	tail   int64  // next append position (current end of file)
+	count  atomic.Int64
 	state  atomic.Int32
 	// cond uses its own mutex, not db.mu, because sync.Cond requires a
 	// plain Locker (Lock/Unlock). Using db.mu.Lock() would block all
@@ -166,6 +167,7 @@ func Open(path string, config Config) (*DB, error) {
 		tail:   info.Size(),
 		cond:   sync.NewCond(&sync.Mutex{}),
 	}
+	db.count.Store(int64(hdr.Count))
 
 	if config.BloomFilter {
 		db.bloom = newBloom()
@@ -215,7 +217,11 @@ func (db *DB) Close() error {
 
 	if db.header.Error == 1 {
 		db.header.Error = 0
-		if err := dirty(db.writer, false); err != nil {
+		db.header.Count = int(db.count.Load())
+		hdrBytes, err := db.header.encode()
+		if err != nil {
+			errs = append(errs, err)
+		} else if _, err := db.writer.WriteAt(hdrBytes, 0); err != nil {
 			errs = append(errs, err)
 		}
 		if err := db.writer.Sync(); err != nil {
@@ -242,6 +248,12 @@ func (db *DB) Close() error {
 //
 // File layout after compaction:
 //   [Header][Heap: data+history by ID,TS][Indexes][Sparse→EOF]
+
+// Count returns the current document count. This is a best-guess value
+// maintained incrementally by Set and Delete. It is corrected to an
+// accurate count during Compact or Repair. For databases created before
+// count tracking was added, it returns 0 until the first Compact.
+func (db *DB) Count() int { return int(db.count.Load()) }
 
 func (db *DB) heapEnd() int64 { return db.header.Heap }
 
