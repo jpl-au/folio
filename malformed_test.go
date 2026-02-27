@@ -27,7 +27,7 @@ func TestDecodeMalformed(t *testing.T) {
 	}{
 		{"empty", []byte{}},
 		{"not json", []byte("not json")},
-		{"incomplete", []byte(`{"idx":1`)},
+		{"incomplete", []byte(`{"_r":1`)},
 		{"wrong type", []byte(`["array"]`)},
 	}
 
@@ -53,7 +53,7 @@ func TestDecodeIndexMalformed(t *testing.T) {
 	}{
 		{"empty", []byte{}},
 		{"not json", []byte("not json")},
-		{"incomplete", []byte(`{"idx":1`)},
+		{"incomplete", []byte(`{"_r":1`)},
 	}
 
 	for _, tt := range tests {
@@ -78,9 +78,9 @@ func TestValidMalformed(t *testing.T) {
 		data []byte
 		want bool
 	}{
-		{[]byte(`{"idx":1}`), true},
+		{[]byte(`{"_r":1}`), true},
 		{[]byte(`{`), true},           // starts with brace
-		{[]byte(` {"idx":1}`), false}, // starts with space
+		{[]byte(` {"_r":1}`), false},  // starts with space
 		{[]byte(`          `), false}, // all spaces (blanked)
 		{[]byte(``), false},           // empty
 		{[]byte(`null`), false},       // not a brace
@@ -105,11 +105,11 @@ func TestLabelMalformed(t *testing.T) {
 		data []byte
 		want string
 	}{
-		{[]byte(`{"idx":1,"_l":"test"}`), "test"},
-		{[]byte(`{"idx":1}`), ""},               // no _l field
-		{[]byte(`{"idx":1,"_l":""}`), ""},       // empty label
-		{[]byte(`not json`), ""},                // not json
-		{[]byte(`{"idx":1,"_l":"unclosed`), ""}, // unclosed quote
+		{[]byte(`{"_r":1,"_l":"test"}`), "test"},
+		{[]byte(`{"_r":1}`), ""},               // no _l field
+		{[]byte(`{"_r":1,"_l":""}`), ""},       // empty label
+		{[]byte(`not json`), ""},               // not json
+		{[]byte(`{"_r":1,"_l":"unclosed`), ""}, // unclosed quote
 	}
 
 	for _, tt := range tests {
@@ -173,7 +173,7 @@ func TestMalformedRecordSkippedInSparse(t *testing.T) {
 
 	db.Set("valid", "content")
 	db.raw([]byte("not valid json"))
-	db.raw([]byte(`{"idx":2,"_id":"0000000000000000","_ts":1234567890123,"_l":"another","_d":"data","_h":"hist"}`))
+	db.raw([]byte(`{"_r":2,"_id":"0000000000000000","_ts":1234567890123,"_l":"another","_d":"data","_h":"hist"}`))
 
 	sz, err := size(db.reader)
 	if err != nil {

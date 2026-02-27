@@ -2,7 +2,7 @@
 //
 // Folio's file format has strict layout requirements that every read
 // function depends on: the header is exactly 128 bytes, record types
-// are at byte 7, IDs are at bytes 16–31, timestamps are at bytes 40–52,
+// are at TypePos, IDs are at IDStart–IDEnd, timestamps are at TSStart–TSEnd,
 // and section boundaries (Heap, Index) define where binary search
 // operates. These tests read raw bytes from the file and verify the
 // format matches expectations. They serve as a contract between the
@@ -49,7 +49,7 @@ func TestConstants(t *testing.T) {
 		{"StateRead", StateRead, 1},
 		{"StateNone", StateNone, 2},
 		{"StateClosed", StateClosed, 3},
-		{"MinRecordSize", MinRecordSize, 53},
+		{"MinRecordSize", MinRecordSize, 52},
 		{"AlgXXHash3", AlgXXHash3, 1},
 		{"AlgFNV1a", AlgFNV1a, 2},
 		{"AlgBlake2b", AlgBlake2b, 3},
@@ -96,8 +96,8 @@ func TestHeaderFormat(t *testing.T) {
 }
 
 // TestRecordFormat verifies that the first record after the header
-// starts with {"idx": and has a valid type byte at position 7. This is
-// the most basic format contract — if the JSON library changed field
+// starts with {"_r": and has a valid type byte at TypePos. This is the
+// most basic format contract — if the JSON library changed field
 // ordering, every fixed-position extraction in scan, scanm, and binary
 // search would read the wrong bytes.
 func TestRecordFormat(t *testing.T) {
@@ -128,13 +128,13 @@ func TestRecordFormat(t *testing.T) {
 
 	record := data[recordStart:recordEnd]
 
-	// Should start with {"idx":
-	if len(record) < 7 || string(record[:7]) != `{"idx":` {
-		t.Errorf("record should start with {\"idx\":")
+	// Should start with {"_r":
+	if len(record) < TypePos || string(record[:TypePos]) != `{"_r":` {
+		t.Errorf("record should start with {\"_r\":")
 	}
 
-	// Type at position 7
-	recordType := record[7] - '0'
+	// Type at TypePos
+	recordType := record[TypePos] - '0'
 	if recordType != TypeRecord && recordType != TypeIndex {
 		t.Errorf("record type = %d, want %d or %d", recordType, TypeRecord, TypeIndex)
 	}
@@ -250,8 +250,9 @@ func TestHistoryRecordFormat(t *testing.T) {
 }
 
 // TestScanmBytePositions marshals each record type and asserts the fixed
-// byte offsets that scanm relies on: type at 7, ID at 16..31, TS at 40..52.
-// If the JSON library changes field order, this test catches it.
+// byte offsets that scanm relies on: type at TypePos, ID at IDStart..IDEnd,
+// TS at TSStart..TSEnd. If the JSON library changes field order, this test
+// catches it.
 func TestScanmBytePositions(t *testing.T) {
 	id := "abcdef0123456789"
 	ts := int64(1706000000000)
@@ -271,16 +272,16 @@ func TestScanmBytePositions(t *testing.T) {
 			if len(b) < MinRecordSize {
 				t.Fatalf("marshalled %s too short: %d bytes", tt.name, len(b))
 			}
-			if b[7]-'0' != byte(b[7]-'0') || int(b[7]-'0') < 1 || int(b[7]-'0') > 3 {
-				t.Errorf("type byte at 7: got %q", b[7])
+			if b[TypePos]-'0' != byte(b[TypePos]-'0') || int(b[TypePos]-'0') < 1 || int(b[TypePos]-'0') > 3 {
+				t.Errorf("type byte at TypePos: got %q", b[TypePos])
 			}
-			gotID := string(b[16:32])
+			gotID := string(b[IDStart:IDEnd])
 			if gotID != id {
-				t.Errorf("ID at [16:32] = %q, want %q\nraw: %s", gotID, id, b)
+				t.Errorf("ID at [IDStart:IDEnd] = %q, want %q\nraw: %s", gotID, id, b)
 			}
-			gotTS := string(b[40:53])
+			gotTS := string(b[TSStart:TSEnd])
 			if gotTS != "1706000000000" {
-				t.Errorf("TS at [40:53] = %q, want %q\nraw: %s", gotTS, "1706000000000", b)
+				t.Errorf("TS at [TSStart:TSEnd] = %q, want %q\nraw: %s", gotTS, "1706000000000", b)
 			}
 		})
 	}
@@ -334,7 +335,7 @@ func TestSectionBoundaries(t *testing.T) {
 }
 
 // TestIDAtFixedPosition verifies that the ID extracted by byte-position
-// (bytes 16–31) matches the ID from full JSON parsing. Binary search
+// (IDStart–IDEnd) matches the ID from full JSON parsing. Binary search
 // uses the byte-position extraction for speed; if the positions drifted
 // from the JSON layout, binary search would compare garbage bytes and
 // miss every document.
@@ -348,13 +349,13 @@ func TestIDAtFixedPosition(t *testing.T) {
 		t.Fatal("no record found")
 	}
 
-	// ID should be at bytes [16:32] relative to record start
+	// ID should be at IDStart:IDEnd relative to record start
 	data := results[0].Data
-	if len(data) < 32 {
+	if len(data) < IDEnd {
 		t.Fatal("record too short")
 	}
 
-	idFromFixed := string(data[16:32])
+	idFromFixed := string(data[IDStart:IDEnd])
 	rec, _ := decode(data)
 
 	if idFromFixed != rec.ID {
@@ -362,7 +363,7 @@ func TestIDAtFixedPosition(t *testing.T) {
 	}
 }
 
-// TestTimestampAtFixedPosition verifies that bytes 40–52 contain a
+// TestTimestampAtFixedPosition verifies that TSStart–TSEnd contain a
 // numeric timestamp. scanm uses this range to extract timestamps
 // without JSON parsing during compaction. If the timestamp moved to
 // a different position, compaction would sort records by garbage values,
@@ -377,14 +378,14 @@ func TestTimestampAtFixedPosition(t *testing.T) {
 		t.Fatal("no record found")
 	}
 
-	// TS should be at bytes [40:53] relative to record start
+	// TS should be at TSStart:TSEnd relative to record start
 	data := results[0].Data
-	if len(data) < 53 {
+	if len(data) < TSEnd {
 		t.Fatal("record too short")
 	}
 
 	// Verify position by checking it's a number
-	tsBytes := data[40:53]
+	tsBytes := data[TSStart:TSEnd]
 	for _, b := range tsBytes {
 		if b < '0' || b > '9' {
 			t.Errorf("TS at fixed position contains non-digit: %q", tsBytes)

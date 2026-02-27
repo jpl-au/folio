@@ -53,7 +53,7 @@ func (db *DB) Rehash(newAlg int) error {
 		if cache[lbl] == "" {
 			cache[lbl] = hash(lbl, newAlg)
 		}
-		if _, err := db.writer.WriteAt([]byte(cache[lbl]), entry.SrcOff+16); err != nil {
+		if _, err := db.writer.WriteAt([]byte(cache[lbl]), entry.SrcOff+IDStart); err != nil {
 			return fmt.Errorf("rehash: write id: %w", err)
 		}
 	}

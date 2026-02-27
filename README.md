@@ -10,13 +10,13 @@ search, concurrent access, and automatic versioning on top of the same file.
 The format is designed so every access path returns correct results: current
 content is plaintext in `_d` and grep-searchable, old versions are compressed
 in `_h` and invisible to text search, and record types are filterable by a
-single field (`idx`).
+single field (`_r`).
 
 ```bash
 # These work without Go, without a server, without anything
 grep '"_d":".*TODO' docs.folio               # search content
 grep -o '"_l":"[^"]*"' docs.folio | sort -u  # list documents
-jq -r 'select(.idx == 2) | ._d' docs.folio  # extract all content
+jq -r 'select(._r == 2) | ._d' docs.folio  # extract all content
 ```
 
 ```go
@@ -25,6 +25,32 @@ db, _ := folio.Open("docs.folio", folio.Config{})
 db.Set("my-doc", "Hello, World!")
 content, _ := db.Get("my-doc")
 ```
+
+## Design
+
+Folio is optimised for **short-lived processes** — a CLI tool or script
+that opens a file, reads or writes, and closes. All state lives on disk:
+no in-memory indexes survive between invocations, no background threads,
+no caches beyond an optional bloom filter built fresh at `Open`. Every
+operation works by streaming the file or seeking to known byte positions.
+
+This is deliberate. Features you might expect from a long-running database
+— event systems, subscription channels, persistent in-memory indexes,
+write-behind caches — are absent because the current design target does
+not benefit from them. A process that opens a file for one lookup and
+closes it would pay the cost of building these structures without ever
+recouping the investment.
+
+The roadmap has three phases:
+
+1. **Short-lived processes** (current) — disk I/O is the critical path.
+   Open, operate, close. No persistent memory structures.
+2. **Bridging** — features useful to both short-lived and long-running
+   processes, such as memory-mapped I/O and batch writes.
+3. **Long-running processes** — memory-oriented features where a process
+   holds the database open for an extended period: cached statistics,
+   event hooks, watch/subscribe.
+
 
 ## Install
 
@@ -81,13 +107,13 @@ func main() {
 ## File Format
 
 Every `.folio` file is valid JSONL. The first line is a fixed-size header;
-subsequent lines are records distinguished by the `idx` field:
+subsequent lines are records distinguished by the `_r` field:
 
 ```
 {"_v":2,"_e":0,"_alg":1,"_ts":1706000000000,"_h":0,"_d":0,"_i":0}       <- Header (128 bytes, space-padded)
-{"idx":2,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"Hello!","_h":"..."} <- Data record
-{"idx":3,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"","_h":"..."}       <- History record
-{"idx":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":128,"_l":"my-doc"}                 <- Index record
+{"_r":2,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"Hello!","_h":"..."} <- Data record
+{"_r":3,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"","_h":"..."}       <- History record
+{"_r":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":128,"_l":"my-doc"}                 <- Index record
 ```
 
 Current content lives in `_d` and is plaintext — grep-searchable directly.

@@ -10,8 +10,8 @@
 //
 // Byte patching (writeAt at offset +34): After compaction, records and
 // indexes are found via binary search over fixed-position fields — the
-// type byte lives at byte 7 and the ID at bytes 16–31. By corrupting
-// at byte 34 (past the ID but inside the JSON body), binary search still
+// type byte lives at TypePos and the ID at bytes IDStart–IDEnd. By
+// corrupting at byte 34 (past the ID but inside the JSON body), binary search still
 // locates the line, but JSON parsing fails when decodeIndex or decode
 // tries to unmarshal it. This simulates bitrot or a partial sector write
 // that damages the middle of a record while leaving the header intact.
@@ -140,7 +140,7 @@ func TestGetCorruptSparseIndex(t *testing.T) {
 	// lands in sparse and matches on ID, but decodeIndex chokes on
 	// the string-typed _o field.
 	id := hash("newdoc", db.header.Algorithm)
-	bad := fmt.Sprintf(`{"idx":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"newdoc"}`, id)
+	bad := fmt.Sprintf(`{"_r":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"newdoc"}`, id)
 	db.raw([]byte(bad))
 
 	_, err := db.Get("newdoc")
@@ -158,7 +158,7 @@ func TestGetCorruptSparseRecordOffset(t *testing.T) {
 	db.Compact()
 
 	id := hash("doc2", db.header.Algorithm)
-	idx := fmt.Sprintf(`{"idx":1,"_id":"%s","_ts":1234567890123,"_o":9999999,"_l":"doc2"}`, id)
+	idx := fmt.Sprintf(`{"_r":1,"_id":"%s","_ts":1234567890123,"_o":9999999,"_l":"doc2"}`, id)
 	db.raw([]byte(idx))
 
 	_, err := db.Get("doc2")
@@ -178,9 +178,9 @@ func TestGetCorruptSparseRecordData(t *testing.T) {
 
 	// Write a truncated record first, then an index that points to it.
 	// The record has an unclosed JSON string, so decode fails.
-	recOff, _ := db.raw([]byte(`{"idx":2,"_id":"0000000000000000","_ts":1234567890123,"_l":"doc2","_d":"!!!CORRUPT`))
+	recOff, _ := db.raw([]byte(`{"_r":2,"_id":"0000000000000000","_ts":1234567890123,"_l":"doc2","_d":"!!!CORRUPT`))
 	id := hash("doc2", db.header.Algorithm)
-	idx := fmt.Sprintf(`{"idx":1,"_id":"%s","_ts":1234567890123,"_o":%d,"_l":"doc2"}`, id, recOff)
+	idx := fmt.Sprintf(`{"_r":1,"_id":"%s","_ts":1234567890123,"_o":%d,"_l":"doc2"}`, id, recOff)
 	db.raw([]byte(idx))
 
 	_, err := db.Get("doc2")
@@ -219,7 +219,7 @@ func TestExistsCorruptSparseIndex(t *testing.T) {
 	db.Compact()
 
 	id := hash("newdoc", db.header.Algorithm)
-	bad := fmt.Sprintf(`{"idx":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"newdoc"}`, id)
+	bad := fmt.Sprintf(`{"_r":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"newdoc"}`, id)
 	db.raw([]byte(bad))
 
 	_, err := db.Exists("newdoc")
@@ -259,7 +259,7 @@ func TestDeleteCorruptSparseIndex(t *testing.T) {
 	db.Compact()
 
 	id := hash("newdoc", db.header.Algorithm)
-	bad := fmt.Sprintf(`{"idx":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"newdoc"}`, id)
+	bad := fmt.Sprintf(`{"_r":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"newdoc"}`, id)
 	db.raw([]byte(bad))
 
 	err := db.Delete("newdoc")
@@ -300,7 +300,7 @@ func TestSetCorruptSparseIndex(t *testing.T) {
 	db.Compact()
 
 	id := hash("newdoc", db.header.Algorithm)
-	bad := fmt.Sprintf(`{"idx":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"newdoc"}`, id)
+	bad := fmt.Sprintf(`{"_r":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"newdoc"}`, id)
 	db.raw([]byte(bad))
 
 	err := db.Set("newdoc", "updated")
@@ -405,8 +405,8 @@ func TestHistoryCorruptType(t *testing.T) {
 	db.Set("doc", "content")
 	db.Compact()
 
-	// Byte 7 of the record is the type digit. Change '2' to '1'.
-	db.writeAt(HeaderSize+7, []byte("1"))
+	// TypePos of the record is the type digit. Change '2' to '1'.
+	db.writeAt(HeaderSize+TypePos, []byte("1"))
 
 	versions, err := collect(db.History("doc"))
 	if err != nil {
@@ -461,7 +461,7 @@ func TestListCorruptIndex(t *testing.T) {
 	db.Compact()
 
 	id := hash("doc2", db.header.Algorithm)
-	bad := fmt.Sprintf(`{"idx":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"doc2"}`, id)
+	bad := fmt.Sprintf(`{"_r":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"doc2"}`, id)
 	db.raw([]byte(bad))
 
 	_, err := collect(db.List())

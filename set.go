@@ -104,7 +104,7 @@ func (db *DB) Set(label, content string) error {
 
 	// Retire the previous version: retype to history, blank _d, erase index
 	if old != nil {
-		if err := db.writeAt(oldIdx.Offset+7, []byte("3")); err != nil {
+		if err := db.writeAt(oldIdx.Offset+TypePos, []byte("3")); err != nil {
 			return fmt.Errorf("set: retype record: %w", err)
 		}
 

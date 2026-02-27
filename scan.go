@@ -45,8 +45,8 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 		recordStart := newlinePos + 1
 		data, err := line(f, recordStart)
 		if err == nil && len(data) > 0 && valid(data) {
-			if len(data) >= MinRecordSize && (recordType == 0 || data[7] == byte('0'+recordType)) {
-				id := string(data[16:32])
+			if len(data) >= MinRecordSize && (recordType == 0 || data[TypePos] == byte('0'+recordType)) {
+				id := string(data[IDStart:IDEnd])
 				pivot = &Result{recordStart, len(data), data, id}
 				pivotEnd = recordStart + int64(len(data)) + 1
 			}
@@ -99,8 +99,8 @@ func scanBack(f *os.File, pos, start int64, recordType int) *Result {
 			continue
 		}
 
-		if len(data) >= MinRecordSize && (recordType == 0 || data[7] == byte('0'+recordType)) {
-			id := string(data[16:32])
+		if len(data) >= MinRecordSize && (recordType == 0 || data[TypePos] == byte('0'+recordType)) {
+			id := string(data[IDStart:IDEnd])
 			return &Result{recordStart, len(data), data, id}
 		}
 	}
@@ -117,8 +117,8 @@ func scanFwd(f *os.File, pos, end int64, recordType int) *Result {
 		}
 
 		if valid(data) {
-			if len(data) >= MinRecordSize && (recordType == 0 || data[7] == byte('0'+recordType)) {
-				id := string(data[16:32])
+			if len(data) >= MinRecordSize && (recordType == 0 || data[TypePos] == byte('0'+recordType)) {
+				id := string(data[IDStart:IDEnd])
 				return &Result{pos, len(data), data, id}
 			}
 		}
@@ -166,7 +166,7 @@ func group(f *os.File, id string, start, end int64) []Result {
 		if err != nil || !valid(data) || len(data) < MinRecordSize {
 			break
 		}
-		rid := string(data[16:32])
+		rid := string(data[IDStart:IDEnd])
 		if rid != id {
 			break
 		}
@@ -185,7 +185,7 @@ func group(f *os.File, id string, start, end int64) []Result {
 			pos += int64(len(data)) + 1
 			continue
 		}
-		rid := string(data[16:32])
+		rid := string(data[IDStart:IDEnd])
 		if rid != id {
 			break
 		}
@@ -231,7 +231,7 @@ func sparse(f *os.File, id string, start, end int64, recordType int) []Result {
 }
 
 // scanm extracts metadata at fixed byte positions without JSON parsing.
-// This is safe because every record starts with {"idx":N,"_id":"...","_ts":N
+// This is safe because every record starts with {"_r":N,"_id":"...","_ts":N
 // and these fields are always serialised in the same order and width.
 // Pass recordType=0 to collect all types. Used by compaction and bloom
 // filter construction where only ID, type, and timestamp are needed.
@@ -248,10 +248,10 @@ func scanm(f *os.File, start, end int64, recordType int) []Entry {
 		length := len(ln)
 
 		if valid(ln) && length >= MinRecordSize {
-			t := int(ln[7] - '0') // {"idx":N — type at byte 7
+			t := int(ln[TypePos] - '0')
 			if recordType == 0 || t == recordType {
-				id := string(ln[16:32])                              // _id at bytes 16..31
-				ts, _ := strconv.ParseInt(string(ln[40:53]), 10, 64) // _ts at bytes 40..52
+				id := string(ln[IDStart:IDEnd])
+				ts, _ := strconv.ParseInt(string(ln[TSStart:TSEnd]), 10, 64)
 				lbl := ""
 				if t == TypeIndex {
 					lbl = label(ln)

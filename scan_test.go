@@ -52,12 +52,12 @@ func fsize(t *testing.T, f *os.File) int64 {
 
 // Helper to create sorted index records
 func makeIndex(id, label string) string {
-	return `{"idx":1,"_id":"` + id + `","_ts":1706000000000,"_o":200,"_l":"` + label + `"}`
+	return `{"_r":1,"_id":"` + id + `","_ts":1706000000000,"_o":200,"_l":"` + label + `"}`
 }
 
 // Helper to create sorted data records
 func makeRecord(id, label string) string {
-	return `{"idx":2,"_id":"` + id + `","_ts":1706000000000,"_l":"` + label + `","_d":"data","_h":"hist"}`
+	return `{"_r":2,"_id":"` + id + `","_ts":1706000000000,"_l":"` + label + `","_d":"data","_h":"hist"}`
 }
 
 // TestScanFindExisting verifies that binary search finds a record in

@@ -1,6 +1,6 @@
 // Version history retrieval from compressed _h snapshots.
 //
-// Both current Records (idx=2) and retired History records (idx=3) carry a
+// Both current Records (_r=2) and retired History records (_r=3) carry a
 // compressed snapshot in _h. History collects all of them for a given label,
 // decompresses each, and yields them in chronological write order.
 //

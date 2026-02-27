@@ -64,7 +64,7 @@ func (db *DB) Delete(label string) error {
 // and erases the index line so the document is no longer discoverable.
 // The _h field is left intact for version retrieval.
 func blank(db *DB, dataOff int64, idx *Result) error {
-	if err := db.writeAt(dataOff+7, []byte("3")); err != nil {
+	if err := db.writeAt(dataOff+TypePos, []byte("3")); err != nil {
 		return fmt.Errorf("retype record: %w", err)
 	}
 

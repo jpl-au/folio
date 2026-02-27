@@ -4,7 +4,7 @@
 // line after the 128-byte header is one of three types: Index (type 1,
 // carries a byte offset to the data), Record (type 2, carries the
 // document content), or History (type 3, carries compressed past
-// versions). The type byte lives at a fixed position (byte 7) so that
+// versions). The type byte lives at a fixed position (byte TypePos) so that
 // scan functions can identify it without JSON parsing.
 //
 // These tests verify the type constants that are persisted on disk, the
@@ -21,7 +21,7 @@ import (
 )
 
 // TestRecordTypeConstants guards the numeric values stored in every
-// record's "idx" field. These values are persisted on disk — if
+// record's "_r" field. These values are persisted on disk — if
 // TypeRecord changed from 2 to something else, existing databases
 // would misidentify every data record.
 func TestRecordTypeConstants(t *testing.T) {
@@ -49,14 +49,14 @@ func TestMaxLabelSize(t *testing.T) {
 }
 
 // TestMinRecordSize guards the minimum line length used by scanm to
-// skip short/corrupt lines. A valid record must be at least 53 bytes
+// skip short/corrupt lines. A valid record must be at least 52 bytes
 // (the fixed-position fields: type, ID, timestamp). If this constant
 // drifted, scanm would either skip valid short records or attempt to
 // extract fields from lines too short to contain them, causing an
 // index-out-of-bounds panic.
 func TestMinRecordSize(t *testing.T) {
-	if MinRecordSize != 53 {
-		t.Errorf("MinRecordSize = %d, want 53", MinRecordSize)
+	if MinRecordSize != 52 {
+		t.Errorf("MinRecordSize = %d, want 52", MinRecordSize)
 	}
 }
 
@@ -65,7 +65,7 @@ func TestMinRecordSize(t *testing.T) {
 // and labels; if the Type field were parsed incorrectly, sparse would
 // misidentify indexes as data records and skip them.
 func TestDecodeIndexRecord(t *testing.T) {
-	data := []byte(`{"idx":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":5000,"_l":"my app"}`)
+	data := []byte(`{"_r":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":5000,"_l":"my app"}`)
 
 	r, err := decode(data)
 	if err != nil {
@@ -86,7 +86,7 @@ func TestDecodeIndexRecord(t *testing.T) {
 // if they were swapped or truncated, Get would return history data as
 // content or History would fail to decompress.
 func TestDecodeDataRecord(t *testing.T) {
-	data := []byte(`{"idx":2,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my app","_d":"content","_h":"compressed"}`)
+	data := []byte(`{"_r":2,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my app","_d":"content","_h":"compressed"}`)
 
 	r, err := decode(data)
 	if err != nil {
@@ -110,7 +110,7 @@ func TestDecodeDataRecord(t *testing.T) {
 // field. If decode() treated empty Data as an error, compacted
 // databases would fail to load their version history.
 func TestDecodeHistoryRecord(t *testing.T) {
-	data := []byte(`{"idx":3,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my app","_d":"","_h":"compressed"}`)
+	data := []byte(`{"_r":3,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my app","_d":"","_h":"compressed"}`)
 
 	r, err := decode(data)
 	if err != nil {
@@ -134,7 +134,7 @@ func TestDecodeHistoryRecord(t *testing.T) {
 // maps into an Index struct (with Offset). If decodeIndex failed to
 // parse _o, Get would seek to offset 0 and read the header as content.
 func TestDecodeIndexRecordWithDecodeIndex(t *testing.T) {
-	data := []byte(`{"idx":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":5000,"_l":"my app"}`)
+	data := []byte(`{"_r":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":5000,"_l":"my app"}`)
 
 	idx, err := decodeIndex(data)
 	if err != nil {
@@ -182,11 +182,11 @@ func TestValid(t *testing.T) {
 		input    []byte
 		expected bool
 	}{
-		{"valid record", []byte(`{"idx":1,...}`), true},
+		{"valid record", []byte(`{"_r":1,...}`), true},
 		{"blanked spaces", []byte("          "), false},
 		{"empty line", []byte(""), false},
 		{"starts with brace", []byte("{"), true},
-		{"starts with space", []byte(` {"idx":1}`), false},
+		{"starts with space", []byte(` {"_r":1}`), false},
 	}
 
 	for _, tt := range tests {
@@ -209,12 +209,12 @@ func TestLabel(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"index record", `{"idx":1,"_id":"abc","_ts":123,"_o":100,"_l":"my label"}`, "my label"},
-		{"data record", `{"idx":2,"_id":"abc","_ts":123,"_l":"my label","_d":"data","_h":"hist"}`, "my label"},
-		{"history record", `{"idx":3,"_id":"abc","_ts":123,"_l":"my label","_d":"","_h":"hist"}`, "my label"},
-		{"special chars", `{"idx":1,"_id":"abc","_ts":123,"_o":100,"_l":"foo/bar:baz"}`, "foo/bar:baz"},
-		{"empty label", `{"idx":1,"_id":"abc","_ts":123,"_o":100,"_l":""}`, ""},
-		{"path separators", `{"idx":1,"_id":"abc","_ts":123,"_o":100,"_l":"a/b/c"}`, `a/b/c`},
+		{"index record", `{"_r":1,"_id":"abc","_ts":123,"_o":100,"_l":"my label"}`, "my label"},
+		{"data record", `{"_r":2,"_id":"abc","_ts":123,"_l":"my label","_d":"data","_h":"hist"}`, "my label"},
+		{"history record", `{"_r":3,"_id":"abc","_ts":123,"_l":"my label","_d":"","_h":"hist"}`, "my label"},
+		{"special chars", `{"_r":1,"_id":"abc","_ts":123,"_o":100,"_l":"foo/bar:baz"}`, "foo/bar:baz"},
+		{"empty label", `{"_r":1,"_id":"abc","_ts":123,"_o":100,"_l":""}`, ""},
+		{"path separators", `{"_r":1,"_id":"abc","_ts":123,"_o":100,"_l":"a/b/c"}`, `a/b/c`},
 	}
 
 	for _, tt := range tests {

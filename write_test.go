@@ -167,7 +167,7 @@ func TestWriteAtOverwrites(t *testing.T) {
 	defer db.Close()
 
 	// Write initial data
-	db.raw([]byte(`{"idx":2,"_id":"0123456789abcdef"}`))
+	db.raw([]byte(`{"_r":2,"_id":"0123456789abcdef"}`))
 
 	// Overwrite part of it
 	db.writeAt(HeaderSize+8, []byte("3"))

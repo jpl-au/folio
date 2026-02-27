@@ -1,6 +1,6 @@
 // Search over document content and labels.
 //
-// Search scans data records (idx=2) and matches against the _d field.
+// Search scans data records (_r=2) and matches against the _d field.
 // Literal patterns (no regex metacharacters) take a fast path: the query
 // is JSON-escaped and matched with bytes.Contains, avoiding both regex
 // overhead and the need to unescape record content. Patterns containing
@@ -21,7 +21,7 @@
 // typically short and the allocation is bounded to the _d field, not the
 // full record line. Revisit if profiling shows GC pressure from search.
 //
-// MatchLabel scans index records (idx=1) and matches against _l.
+// MatchLabel scans index records (_r=1) and matches against _l.
 // Both stream through the file line-by-line to avoid loading it into memory.
 // Callers consume results lazily via range and can break early to stop the
 // scan without reading the rest of the file.
@@ -111,7 +111,7 @@ func (db *DB) Search(pattern string, opts SearchOptions) iter.Seq2[Match, error]
 		for scanner.Scan() {
 			ln := scanner.Bytes()
 
-			if valid(ln) && len(ln) >= MinRecordSize && ln[7] == byte('0'+TypeRecord) {
+			if valid(ln) && len(ln) >= MinRecordSize && ln[TypePos] == byte('0'+TypeRecord) {
 				di := bytes.Index(ln, dTag)
 				if di >= 0 {
 					start := di + len(dTag)
@@ -140,8 +140,8 @@ func (db *DB) Search(pattern string, opts SearchOptions) iter.Seq2[Match, error]
 }
 
 // MatchLabel matches a regex against the _l field of index records.
-// Only index lines (idx=1) are checked, so the scan skips data records
-// entirely using the type byte at position 7. Results are yielded lazily.
+// Only index lines (_r=1) are checked, so the scan skips data records
+// entirely using the type byte at TypePos. Results are yielded lazily.
 func (db *DB) MatchLabel(pattern string) iter.Seq2[Match, error] {
 	return func(yield func(Match, error) bool) {
 		if err := db.blockRead(); err != nil {
@@ -153,7 +153,7 @@ func (db *DB) MatchLabel(pattern string) iter.Seq2[Match, error] {
 			db.lock.Unlock()
 		}()
 
-		fullPattern := `(?i){"idx":1.*"_l":"[^"]*` + pattern + `[^"]*"`
+		fullPattern := `(?i){"_r":1.*"_l":"[^"]*` + pattern + `[^"]*"`
 		re, err := regexp.Compile(fullPattern)
 		if err != nil {
 			yield(Match{}, ErrInvalidPattern)
@@ -174,7 +174,7 @@ func (db *DB) MatchLabel(pattern string) iter.Seq2[Match, error] {
 		for scanner.Scan() {
 			line := scanner.Bytes()
 
-			if len(line) > 8 && line[7] == '1' {
+			if len(line) > TypePos && line[TypePos] == '1' {
 				loc := re.FindIndex(line)
 				if loc != nil {
 					lbl := label(line)

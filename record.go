@@ -1,14 +1,14 @@
 // Record format and type definitions.
 //
-// Every line in the database file is a JSON object beginning with {"idx":N
+// Every line in the database file is a JSON object beginning with {"_r":N
 // where N identifies the record type. This fixed prefix allows type detection
 // and ID extraction at known byte offsets without JSON parsing — critical for
 // binary search and compaction where millions of records may be scanned.
 //
 // Three types coexist in the file:
-//   - Index (idx=1): maps a label's hash to the byte offset of its data record.
-//   - Record (idx=2): the current content of a document.
-//   - History (idx=3): a previous version with compressed content in _h.
+//   - Index (_r=1): maps a label's hash to the byte offset of its data record.
+//   - Record (_r=2): the current content of a document.
+//   - History (_r=3): a previous version with compressed content in _h.
 //
 // On update, the old Record is retyped to History (byte patch from 2→3) and
 // its _d field is blanked. This preserves the compressed snapshot in _h for
@@ -25,7 +25,7 @@ import (
 )
 
 // Record type markers. These appear as the first value in every JSON line
-// ({"idx":N) and are used for byte-level type checks during scan.
+// ({"_r":N) and are used for byte-level type checks during scan.
 const (
 	TypeIndex   = 1
 	TypeRecord  = 2
@@ -39,7 +39,7 @@ const MaxRecordSize = 16 * 1024 * 1024 // 16MB, bounds scanner buffer allocation
 // Record has its Type patched from 2→3 (becoming history) and _d blanked,
 // so the compressed _h snapshot is the only way to recover prior content.
 type Record struct {
-	Type      int    `json:"idx"`
+	Type      int    `json:"_r"`
 	ID        string `json:"_id"` // 16 hex chars, hash of Label
 	Timestamp int64  `json:"_ts"` // unix ms
 	Label     string `json:"_l"`
@@ -51,7 +51,7 @@ type Record struct {
 // During lookup, the index is found first (by binary or sparse scan on ID),
 // then the data record is read at the offset the index points to.
 type Index struct {
-	Type      int    `json:"idx"`
+	Type      int    `json:"_r"`
 	ID        string `json:"_id"`
 	Timestamp int64  `json:"_ts"`
 	Offset    int64  `json:"_o"` // byte position of the corresponding Record
@@ -80,9 +80,18 @@ type Entry struct {
 	Label  string // populated only for index entries
 }
 
-// MinRecordSize is the shortest valid JSON line. Anything shorter cannot
-// contain the required idx, _id, and _ts fields and is skipped during scan.
-const MinRecordSize = 53
+// Fixed byte positions within a record line. Every record starts with
+// {"_r":N,"_id":"...","_ts":N and these fields are always serialised in
+// the same order, so type, ID, and timestamp can be read at known offsets
+// without JSON parsing.
+const (
+	TypePos       = 6  // {"_r":N — type digit position
+	IDStart       = 15 // first byte of the 16-char hex ID
+	IDEnd         = 31 // one past the last byte of the ID
+	TSStart       = 39 // first byte of the 13-digit timestamp
+	TSEnd         = 52 // one past the last byte of the timestamp
+	MinRecordSize = 52 // shortest valid line (must reach TSEnd)
+)
 
 // decode performs full JSON parsing of a record line.
 func decode(data []byte) (*Record, error) {

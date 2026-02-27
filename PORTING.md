@@ -64,45 +64,45 @@ entire header.
 ## Records
 
 Every record is a single JSON line. There are three types, distinguished by
-`idx`:
+`_r`:
 
-### Data Record (idx=2)
+### Data Record (_r=2)
 
 The current content of a document.
 
 ```json
-{"idx":2,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"Hello!","_h":"<compressed>"}
+{"_r":2,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"Hello!","_h":"<compressed>"}
 ```
 
 | Field | Description |
 |-------|-------------|
-| `idx` | Always 2 |
+| `_r` | Always 2 |
 | `_id` | 16 hex characters, hash of the label |
 | `_ts` | Unix milliseconds, write time |
 | `_l`  | Document label (user-facing name, max 256 bytes) |
 | `_d`  | Current content, plaintext |
 | `_h`  | Zstd-compressed, Ascii85-encoded snapshot of the content |
 
-### History Record (idx=3)
+### History Record (_r=3)
 
 A previous version. Created when a document is updated: the old data record
 is patched in place — type byte changed from `2` to `3`, `_d` field
 overwritten with spaces (preserving byte offsets), `_h` field left intact.
 
 ```json
-{"idx":3,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"      ","_h":"<compressed>"}
+{"_r":3,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"      ","_h":"<compressed>"}
 ```
 
 The blanked `_d` field is intentional: grep won't match old content, but the
 compressed version in `_h` is fully recoverable.
 
-### Index Record (idx=1)
+### Index Record (_r=1)
 
 A pointer from a label's hash ID to the byte offset of its current data
 record.
 
 ```json
-{"idx":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":128,"_l":"my-doc"}
+{"_r":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":128,"_l":"my-doc"}
 ```
 
 | Field | Description |
@@ -116,9 +116,9 @@ parsing:
 
 | Offset | Length | Content |
 |--------|--------|---------|
-| 7      | 1      | Record type: `1`, `2`, or `3` |
-| 16     | 16     | ID (hex string) |
-| 40     | 13     | Timestamp (digits) |
+| 6      | 1      | Record type: `1`, `2`, or `3` |
+| 15     | 16     | ID (hex string) |
+| 39     | 13     | Timestamp (digits) |
 
 This is critical for performance: binary search and compaction read type, ID,
 and timestamp from raw bytes without deserialising the full JSON. An
@@ -170,7 +170,7 @@ Binary search operates on byte ranges, not line numbers:
 
 1. Compute the midpoint byte offset between `lo` and `hi`.
 2. Walk forward to the next newline to find a record boundary.
-3. Extract the ID from bytes 16..31 of that line.
+3. Extract the ID from bytes 15..30 of that line.
 4. Compare with the target ID to narrow `lo`/`hi`.
 
 If walking forward overshoots `hi`, walk backward from the midpoint instead.
@@ -205,7 +205,7 @@ To write a document:
 1. Acquire an exclusive lock.
 2. Set the dirty flag (`_e` = 1) via a single-byte write at offset 13.
 3. If the label already exists, patch the old data record in place:
-   - Overwrite byte 7 from `2` to `3` (data becomes history).
+   - Overwrite byte 6 from `2` to `3` (data becomes history).
    - Overwrite the `_d` field value with spaces (preserving byte length).
 4. Append a new data record and a new index record to EOF (the sparse
    region).
@@ -274,7 +274,7 @@ machine and mutex are optimisations for concurrent in-process access.
 ## Rehash
 
 `Rehash(newAlgorithm)` migrates all record IDs to a different hash
-algorithm. Since IDs occupy a fixed position (bytes 16..31), this can
+algorithm. Since IDs occupy a fixed position (bytes 15..30), this can
 overwrite them in place without rewriting the full record. After patching
 all IDs, the header's `_alg` field is updated and the file is fsynced.
 
@@ -292,7 +292,7 @@ the dirty flag before patching, clear after the header update).
 
 ## Search
 
-Search scans data records (`idx=2`) and matches the pattern against the
+Search scans data records (`_r=2`) and matches the pattern against the
 `_d` field. The scan is streaming: records are read line-by-line with a
 bounded buffer, and the `_d` content is extracted by byte-scanning for
 field delimiters rather than JSON-parsing each line. Memory stays
@@ -325,17 +325,17 @@ format requirement.
 | Default max record size | 16 MB |
 | ID length | 16 hex characters |
 | Timestamp | Unix milliseconds (13 digits) |
-| Min record size | 53 bytes |
+| Min record size | 52 bytes |
 
 ## Read-Only Access
 
 A read-only implementation is straightforward:
 
 1. Read the 128-byte header.
-2. To list documents: scan for `idx=1` records, collect `_l` fields.
-3. To get a document: scan for `idx=2` records matching the label,
+2. To list documents: scan for `_r=1` records, collect `_l` fields.
+3. To get a document: scan for `_r=2` records matching the label,
    take the latest by `_ts`.
-4. To get history: scan for `idx=2` and `idx=3` records matching the
+4. To get history: scan for `_r=2` and `_r=3` records matching the
    label's ID, decompress `_h` fields (Zstd, then Ascii85-decode).
 
 No locking, no binary search, no bloom filter needed. Linear scan of the

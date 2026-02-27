@@ -6,6 +6,19 @@ Folio is a JSONL document store where the file is the interface. A single
 engine running. The Go library adds binary search, concurrent access, and
 automatic versioning on top of the same file.
 
+## Design target
+
+Folio is optimised for short-lived processes: open, operate, close. There
+are no in-memory indexes that persist between invocations, no event
+system, no caching layer, and no subscription mechanism. These are
+deliberate omissions, not missing features — a process that opens a file
+for one lookup cannot amortise the cost of building such structures.
+
+When suggesting improvements, assume the caller opens the database, runs
+a small number of operations, and closes it. Do not propose features that
+only pay off for long-running processes (e.g. watch channels, in-memory
+query caches, background compaction threads).
+
 ## Which doc do you need?
 
 | Goal | Read |
@@ -17,10 +30,10 @@ automatic versioning on top of the same file.
 ## Format at a glance
 
 Every `.folio` file is valid JSONL. Line 1 is a fixed-size header. Every
-subsequent line is one of three record types, distinguished by the `idx`
+subsequent line is one of three record types, distinguished by the `_r`
 field:
 
-| `idx` | Type | Purpose |
+| `_r` | Type | Purpose |
 |-------|------|---------|
 | 1 | Index | Pointer from a label's hash ID to the byte offset of its data record |
 | 2 | Data | Current content — `_d` holds the plaintext, `_l` holds the label |
@@ -50,13 +63,13 @@ grep '"_d":".*pattern' docs.folio
 grep -o '"_l":"[^"]*"' docs.folio | sort -u
 
 # Extract current content (all documents)
-jq -r 'select(.idx == 2) | ._d' docs.folio
+jq -r 'select(._r == 2) | ._d' docs.folio
 
 # Get a specific document by label
-grep '"idx":2' docs.folio | grep '"_l":"my-doc"' | jq -r '._d'
+grep '"_r":2' docs.folio | grep '"_l":"my-doc"' | jq -r '._d'
 
 # Count documents
-grep -c '"idx":1' docs.folio
+grep -c '"_r":1' docs.folio
 ```
 
 See [USAGE.md](USAGE.md) for the full catalogue.
