@@ -30,10 +30,11 @@ empty — everything is sparse. After `Compact`, records are sorted into the
 heap and index, and the sparse section is empty. Normal operation appends
 to sparse; compaction periodically reorganises.
 
-The header stores byte offsets marking the boundaries:
+The header stores byte offsets marking the boundaries in the `_s` state
+array:
 
-- `_h`: end of heap (= start of index)
-- `_i`: end of index (= start of sparse)
+- `_s[0]`: end of heap (= start of index)
+- `_s[1]`: end of index (= start of sparse)
 
 When both are 0, no compaction has occurred and the entire file after the
 header is sparse.
@@ -44,19 +45,27 @@ The first line is a JSON object, space-padded to exactly 127 bytes, followed
 by a newline (128 bytes total).
 
 ```json
-{"_v":2,"_e":0,"_alg":1,"_ts":1706000000000,"_h":0,"_d":0,"_i":0,"_c":0}
+{"_v":1,"_e":0,"_alg":1,"_ts":1706000000000,"_s":[0,0,0,0,0,0]}
 ```
 
-| Field  | Type | Description |
-|--------|------|-------------|
-| `_v`   | int  | Format version (currently 2) |
-| `_e`   | int  | Dirty flag: 0 = clean, 1 = unclean shutdown |
-| `_alg` | int  | Hash algorithm: 1 = xxHash3, 2 = FNV-1a, 3 = Blake2b |
-| `_ts`  | int  | Unix milliseconds, last header write |
-| `_h`   | int  | Byte offset: end of heap section |
-| `_d`   | int  | Reserved (0) |
-| `_i`   | int  | Byte offset: end of index section |
-| `_c`   | int  | Document count (best-guess, corrected by compaction) |
+| Field  | Type   | Description |
+|--------|--------|-------------|
+| `_v`   | int    | Format version (currently 1) |
+| `_e`   | int    | Dirty flag: 0 = clean, 1 = unclean shutdown |
+| `_alg` | int    | Hash algorithm: 1 = xxHash3, 2 = FNV-1a, 3 = Blake2b |
+| `_ts`  | int    | Unix milliseconds, last header write |
+| `_s`   | [6]uint | State array (see below) |
+
+The `_s` array holds all mutable unsigned integer state:
+
+| Index | Description |
+|-------|-------------|
+| 0     | Byte offset: end of heap section |
+| 1     | Byte offset: end of index section |
+| 2     | Reserved (0) |
+| 3     | Document count (best-guess, corrected by compaction) |
+| 4     | Writes since last compaction |
+| 5     | Auto-compaction threshold (modulus, 0 = disabled) |
 
 The dirty flag (`_e`) sits at a known byte position (offset 13 in the line)
 so it can be toggled with a single-byte write rather than rewriting the

@@ -74,7 +74,7 @@ func TestEmptyLabel(t *testing.T) {
 
 // TestFreshDatabaseEdgeCases exercises every read and maintenance
 // operation on an empty database. A fresh database has only a header;
-// Heap and Index are both zero, and the sparse region starts at
+// heap and index offsets are both zero, and the sparse region starts at
 // HeaderSize with tail == HeaderSize (no records). Every operation must
 // handle this gracefully: Get and Delete return ErrNotFound, List and
 // History return empty slices, Compact and Purge succeed as no-ops. If

@@ -1,11 +1,11 @@
 // Header serialisation and validation tests.
 //
 // The header is a fixed 128-byte JSON line at byte 0 of every folio file.
-// It stores the hash algorithm, section boundaries (Heap, Index), and a
-// dirty flag (Error) used for crash recovery. Every read operation depends
-// on correct header values to find the sorted and sparse regions — a wrong
-// Heap offset would cause binary search to read data records as indexes,
-// returning garbage offsets to Get.
+// It stores the hash algorithm, section boundaries (State[stHeap],
+// State[stIndex]), and a dirty flag (Error) used for crash recovery. Every
+// read operation depends on correct header values to find the sorted and
+// sparse regions — a wrong heap offset would cause binary search to read
+// data records as indexes, returning garbage offsets to Get.
 //
 // These tests verify: encoding produces exactly 128 bytes, round-trip
 // encode/decode preserves all fields, the dirty flag occupies the expected
@@ -36,11 +36,9 @@ func TestHeaderSize(t *testing.T) {
 // oversized line, failing JSON parsing.
 func TestHeaderEncode(t *testing.T) {
 	h := &Header{
-		Error:     0,
 		Algorithm: AlgXXHash3,
 		Timestamp: 1706000000000,
-		Heap:      5000,
-		Index:     6000,
+		State:     [6]uint64{5000, 6000},
 	}
 
 	buf, err := h.encode()
@@ -57,18 +55,15 @@ func TestHeaderEncode(t *testing.T) {
 	}
 }
 
-// TestHeaderEncodeFreshDB verifies encoding when Heap and Index are zero
+// TestHeaderEncodeFreshDB verifies encoding when State offsets are zero
 // (no compaction has occurred). The JSON must still pad to exactly 128
 // bytes — if the padding logic assumed non-zero section offsets, a fresh
 // database would have a short header and every subsequent write would
 // land at the wrong file position.
 func TestHeaderEncodeFreshDB(t *testing.T) {
 	h := &Header{
-		Error:     0,
 		Algorithm: AlgXXHash3,
 		Timestamp: 1706000000000,
-		Heap:      0,
-		Index:     0,
 	}
 
 	buf, err := h.encode()
@@ -92,11 +87,9 @@ func TestHeaderReadWrite(t *testing.T) {
 
 	// Write header
 	original := &Header{
-		Error:     0,
 		Algorithm: AlgFNV1a,
 		Timestamp: 1706000000000,
-		Heap:      1000,
-		Index:     2000,
+		State:     [6]uint64{1000, 2000, 0, 42, 10, 100},
 	}
 
 	buf, err := original.encode()
@@ -129,11 +122,8 @@ func TestHeaderReadWrite(t *testing.T) {
 	if h.Timestamp != original.Timestamp {
 		t.Errorf("Timestamp = %d, want %d", h.Timestamp, original.Timestamp)
 	}
-	if h.Heap != original.Heap {
-		t.Errorf("Heap = %d, want %d", h.Heap, original.Heap)
-	}
-	if h.Index != original.Index {
-		t.Errorf("Index = %d, want %d", h.Index, original.Index)
+	if h.State != original.State {
+		t.Errorf("State = %v, want %v", h.State, original.State)
 	}
 }
 
@@ -149,11 +139,8 @@ func TestHeaderDirtyFlag(t *testing.T) {
 
 	// Create file with clean header
 	h := &Header{
-		Error:     0,
 		Algorithm: AlgXXHash3,
 		Timestamp: 1706000000000,
-		Heap:      0,
-		Index:     0,
 	}
 
 	buf, _ := h.encode()
@@ -197,11 +184,8 @@ func TestHeaderDirtyPosition(t *testing.T) {
 	path := filepath.Join(dir, "test.folio")
 
 	h := &Header{
-		Error:     0,
 		Algorithm: AlgXXHash3,
 		Timestamp: 1706000000000,
-		Heap:      0,
-		Index:     0,
 	}
 
 	buf, _ := h.encode()
@@ -224,16 +208,16 @@ func TestHeaderDirtyPosition(t *testing.T) {
 	}
 }
 
-// TestHeaderCorruptHeapTooSmall verifies that header() rejects a Heap
-// offset smaller than HeaderSize. A Heap value of 50 would place data
-// records inside the header region, so binary search would read header
-// JSON as a record and return nonsense. The validation in header()
-// catches this on Open before any data operations begin.
+// TestHeaderCorruptHeapTooSmall verifies that header() rejects a heap
+// offset smaller than HeaderSize. A value of 50 would place data records
+// inside the header region, so binary search would read header JSON as a
+// record and return nonsense. The validation in header() catches this on
+// Open before any data operations begin.
 func TestHeaderCorruptHeapTooSmall(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.folio")
 
-	h := &Header{Version: 2, Algorithm: AlgXXHash3, Heap: 50}
+	h := &Header{Version: 1, Algorithm: AlgXXHash3, State: [6]uint64{50}}
 	buf, _ := h.encode()
 	os.WriteFile(path, buf, 0644)
 
@@ -246,7 +230,7 @@ func TestHeaderCorruptHeapTooSmall(t *testing.T) {
 	}
 }
 
-// TestHeaderCorruptIndexTooSmall verifies that header() rejects an Index
+// TestHeaderCorruptIndexTooSmall verifies that header() rejects an index
 // offset smaller than HeaderSize. The index section must start after
 // the header; a value of 50 would overlap the header, causing the
 // sorted-index binary search to read header bytes as index JSON.
@@ -254,7 +238,7 @@ func TestHeaderCorruptIndexTooSmall(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.folio")
 
-	h := &Header{Version: 2, Algorithm: AlgXXHash3, Index: 50}
+	h := &Header{Version: 1, Algorithm: AlgXXHash3, State: [6]uint64{0, 50}}
 	buf, _ := h.encode()
 	os.WriteFile(path, buf, 0644)
 
@@ -268,15 +252,15 @@ func TestHeaderCorruptIndexTooSmall(t *testing.T) {
 }
 
 // TestHeaderCorruptHeapAfterIndex verifies that header() rejects a file
-// where Heap > Index. The layout invariant is [Header][Heap][Index][Sparse]:
-// Heap must end before Index begins. If this were inverted, the binary
+// where heap > index. The layout invariant is [Header][Heap][Index][Sparse]:
+// heap must end before index begins. If this were inverted, the binary
 // search boundaries would be wrong and Get would scan data records as
 // indexes, returning byte offsets from document content fields.
 func TestHeaderCorruptHeapAfterIndex(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.folio")
 
-	h := &Header{Version: 2, Algorithm: AlgXXHash3, Heap: 5000, Index: 4000}
+	h := &Header{Version: 1, Algorithm: AlgXXHash3, State: [6]uint64{5000, 4000}}
 	buf, _ := h.encode()
 	os.WriteFile(path, buf, 0644)
 
@@ -322,11 +306,8 @@ func TestHeaderCorruptJSON(t *testing.T) {
 func TestHeaderAllAlgorithms(t *testing.T) {
 	for _, alg := range []int{AlgXXHash3, AlgFNV1a, AlgBlake2b} {
 		h := &Header{
-			Error:     0,
 			Algorithm: alg,
 			Timestamp: 1706000000000,
-			Heap:      0,
-			Index:     0,
 		}
 
 		buf, err := h.encode()

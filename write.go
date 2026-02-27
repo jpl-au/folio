@@ -17,6 +17,10 @@ func (db *DB) raw(line []byte) (int64, error) {
 		db.header.Error = 1
 		dirty(db.writer, true)
 	}
+	// Every raw write increments the write counter so shouldCompact()
+	// can fire auto-compaction when the counter hits the threshold modulus.
+	// The counter resets to 0 after each compaction (see rebuild).
+	db.header.State[stWrites]++
 
 	offset := db.tail
 	data := append(line, '\n')
@@ -62,6 +66,17 @@ func (db *DB) append(record *Record, idx *Index) (int64, error) {
 	}
 
 	return dataOffset, nil
+}
+
+// shouldCompact reports whether the write counter has hit the auto-
+// compaction threshold. A threshold of 0 disables auto-compaction.
+// When enabled, compaction fires every N writes (where N is the
+// threshold) using modular arithmetic: writes % threshold == 0.
+// The caller must hold the write lock because this reads mutable
+// header state.
+func (db *DB) shouldCompact() bool {
+	t := db.header.State[stThreshold]
+	return t > 0 && db.header.State[stWrites]%t == 0
 }
 
 // writeAt patches bytes at an existing offset without moving the tail.

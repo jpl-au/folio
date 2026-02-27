@@ -129,7 +129,8 @@ func (db *DB) Repair(opts *CompactOptions) error {
 	db.writer = writer
 	db.lock.setFile(db.writer)
 	db.header = hdrParsed
-	db.count.Store(int64(hdrParsed.Count))
+	db.count.Store(hdrParsed.State[stCount])
+
 	db.tail = indexEnd
 
 	if db.bloom != nil {
@@ -157,8 +158,8 @@ func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
 	heap, indexes := unpack(entries, exclude...)
 
 	// Sort heap by ID then timestamp so all versions of a document are
-	// contiguous, oldest first. History records (idx=3) for an ID precede
-	// the current data record (idx=2) because they have earlier timestamps.
+	// contiguous, oldest first. History records (_r=3) for an ID precede
+	// the current data record (_r=2) because they have earlier timestamps.
 	slices.SortFunc(heap, byIDThenTS)
 
 	// Keyed by label so each document keeps exactly one index in the output.
@@ -230,13 +231,17 @@ func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
 
 	// Now that all sections are written, we know their boundary offsets.
 	hdr := Header{
-		Version:   2,
+		Version:   1,
 		Timestamp: now(),
 		Algorithm: db.header.Algorithm,
-		Heap:      heapEnd,
-		Index:     indexEnd,
-		Error:     0,
-		Count:     len(indexMap),
+		State: [6]uint64{
+			uint64(heapEnd),              // stHeap
+			uint64(indexEnd),             // stIndex
+			0,                            // stReserved
+			uint64(len(indexMap)),        // stCount
+			0,                            // stWrites (reset after compaction)
+			db.header.State[stThreshold], // stThreshold (preserve setting)
+		},
 	}
 	hdrBytes, err := hdr.encode()
 	if err != nil {

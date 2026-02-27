@@ -110,7 +110,7 @@ Every `.folio` file is valid JSONL. The first line is a fixed-size header;
 subsequent lines are records distinguished by the `_r` field:
 
 ```
-{"_v":2,"_e":0,"_alg":1,"_ts":1706000000000,"_h":0,"_d":0,"_i":0}       <- Header (128 bytes, space-padded)
+{"_v":1,"_e":0,"_alg":1,"_ts":1706000000000,"_s":[0,0,0,0,0,0]}        <- Header (128 bytes, space-padded)
 {"_r":2,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"Hello!","_h":"..."} <- Data record
 {"_r":3,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_l":"my-doc","_d":"","_h":"..."}       <- History record
 {"_r":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":128,"_l":"my-doc"}                 <- Index record
@@ -177,6 +177,7 @@ db, err := folio.Open("data/docs.folio", folio.Config{
     MaxRecordSize: 16 * 1024 * 1024,  // largest record allowed (default 16MB)
     SyncWrites:    false,             // fsync after every write
     BloomFilter:   true,              // in-memory filter for sparse region
+    AutoCompact:   50,                // compact every 50 writes (0 = disabled)
 })
 ```
 

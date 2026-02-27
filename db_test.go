@@ -794,8 +794,8 @@ func TestCountAfterCompact(t *testing.T) {
 }
 
 // TestCountPersistence verifies that the count survives close and
-// reopen. Close writes the full header (including _c) to disk; Open
-// reads it back and initialises the atomic counter.
+// reopen. Close writes the full header (including State[stCount]) to
+// disk; Open reads it back and initialises the atomic counter.
 func TestCountPersistence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.folio")
@@ -1078,5 +1078,79 @@ func TestStateConstants(t *testing.T) {
 	}
 	if StateClosed != 3 {
 		t.Errorf("StateClosed = %d, want 3", StateClosed)
+	}
+}
+
+// TestAutoCompact verifies that compaction fires automatically when the
+// write counter hits the threshold modulus. After the threshold number
+// of writes, the sparse region should be empty (all records moved to
+// the sorted section).
+func TestAutoCompact(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(filepath.Join(dir, "test.folio"), Config{AutoCompact: 5})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	// Each Set goes through raw() which increments stWrites.
+	// append() calls raw() once per Set (record+index combined).
+	for i := range 5 {
+		db.Set("doc", strings.Repeat("x", i+1))
+	}
+
+	// After 5 writes, auto-compaction should have fired.
+	if db.header.State[stHeap] == 0 {
+		t.Error("State[stHeap] should be set after auto-compaction")
+	}
+	if db.header.State[stIndex] == 0 {
+		t.Error("State[stIndex] should be set after auto-compaction")
+	}
+	// Write counter should be reset by compaction.
+	if db.header.State[stWrites] != 0 {
+		t.Errorf("State[stWrites] = %d, want 0", db.header.State[stWrites])
+	}
+
+	// Data should still be accessible.
+	data, err := db.Get("doc")
+	if err != nil {
+		t.Fatalf("Get after auto-compact: %v", err)
+	}
+	if data != "xxxxx" {
+		t.Errorf("Get = %q, want %q", data, "xxxxx")
+	}
+}
+
+// TestAutoCompactDisabled verifies that auto-compaction does not fire
+// when the threshold is 0 (default).
+func TestAutoCompactDisabled(t *testing.T) {
+	db := openTestDB(t)
+
+	for i := range 10 {
+		db.Set("doc", strings.Repeat("x", i+1))
+	}
+
+	// No compaction should have occurred.
+	if db.header.State[stHeap] != 0 {
+		t.Error("State[stHeap] should be 0 when auto-compact is disabled")
+	}
+}
+
+// TestAutoCompactThresholdPersists verifies that the threshold survives
+// compaction and close/reopen. The threshold is stored in State[stThreshold]
+// and must be preserved by Repair/Compact.
+func TestAutoCompactThresholdPersists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.folio")
+
+	db, _ := Open(path, Config{AutoCompact: 50})
+	db.Set("doc", "content")
+	db.Close()
+
+	db2, _ := Open(path, Config{})
+	defer db2.Close()
+
+	if db2.header.State[stThreshold] != 50 {
+		t.Errorf("State[stThreshold] = %d, want 50", db2.header.State[stThreshold])
 	}
 }

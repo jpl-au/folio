@@ -3,7 +3,7 @@
 // Folio's file format has strict layout requirements that every read
 // function depends on: the header is exactly 128 bytes, record types
 // are at TypePos, IDs are at IDStart–IDEnd, timestamps are at TSStart–TSEnd,
-// and section boundaries (Heap, Index) define where binary search
+// and section boundaries (State[stHeap], State[stIndex]) define where binary search
 // operates. These tests read raw bytes from the file and verify the
 // format matches expectations. They serve as a contract between the
 // write path (which produces the layout) and the read path (which

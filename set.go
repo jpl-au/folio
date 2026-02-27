@@ -28,12 +28,21 @@ func (db *DB) Set(label, content string) error {
 	if err := db.blockWrite(); err != nil {
 		return err
 	}
-	defer func() {
-		db.mu.Unlock()
-		db.lock.Unlock()
-	}()
 
-	return db.setOne(label, content)
+	err := db.setOne(label, content)
+
+	// Check the compaction threshold while locks are held so the read
+	// of State is consistent. Compact() is called after releasing both
+	// locks because it acquires its own locks internally — calling it
+	// here would deadlock.
+	compact := err == nil && db.shouldCompact()
+	db.mu.Unlock()
+	db.lock.Unlock()
+
+	if compact {
+		db.Compact()
+	}
+	return err
 }
 
 // Batch creates or updates multiple documents under a single lock
@@ -49,17 +58,23 @@ func (db *DB) Batch(docs ...Document) error {
 	if err := db.blockWrite(); err != nil {
 		return err
 	}
-	defer func() {
-		db.mu.Unlock()
-		db.lock.Unlock()
-	}()
 
+	var err error
 	for _, d := range docs {
-		if err := db.setOne(d.Label, d.Data); err != nil {
-			return err
+		if err = db.setOne(d.Label, d.Data); err != nil {
+			break
 		}
 	}
-	return nil
+
+	// Same pattern as Set: check threshold under lock, compact after release.
+	compact := err == nil && db.shouldCompact()
+	db.mu.Unlock()
+	db.lock.Unlock()
+
+	if compact {
+		db.Compact()
+	}
+	return err
 }
 
 // validateDoc checks label and content constraints before any write.

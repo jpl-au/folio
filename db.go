@@ -43,6 +43,7 @@ type Config struct {
 	MaxRecordSize int  // largest allowed record (default 16MB)
 	SyncWrites    bool // fsync after every write (durability vs throughput)
 	BloomFilter   bool // maintain bloom filter over the sparse region
+	AutoCompact   int  // compact every N writes; persisted to header, 0 = leave stored value unchanged
 }
 
 // DB is an open database handle. Two separate file descriptors are held
@@ -60,7 +61,7 @@ type DB struct {
 	config Config
 	bloom  *bloom // nil unless Config.BloomFilter is set
 	tail   int64  // next append position (current end of file)
-	count  atomic.Int64
+	count  atomic.Uint64
 	state  atomic.Int32
 	// cond uses its own mutex, not db.mu, because sync.Cond requires a
 	// plain Locker (Lock/Unlock). Using db.mu.Lock() would block all
@@ -100,13 +101,11 @@ func Open(path string, config Config) (*DB, error) {
 			return nil, err
 		}
 		hdr := Header{
-			Version:   2,
+			Version:   1,
 			Timestamp: now(),
 			Algorithm: config.HashAlgorithm,
-			Heap:      0,
-			Index:     0,
-			Error:     0,
 		}
+		hdr.State[stThreshold] = uint64(config.AutoCompact)
 		buf, err := hdr.encode()
 		if err != nil {
 			file.Close()
@@ -167,7 +166,26 @@ func Open(path string, config Config) (*DB, error) {
 		tail:   info.Size(),
 		cond:   sync.NewCond(&sync.Mutex{}),
 	}
-	db.count.Store(int64(hdr.Count))
+	db.count.Store(hdr.State[stCount])
+
+	// A non-zero AutoCompact is a deliberate change — persist it to the
+	// header so it survives future opens without needing to be repeated.
+	if config.AutoCompact > 0 && uint64(config.AutoCompact) != hdr.State[stThreshold] {
+		db.header.State[stThreshold] = uint64(config.AutoCompact)
+		hdrBytes, err := db.header.encode()
+		if err != nil {
+			reader.Close()
+			writer.Close()
+			root.Close()
+			return nil, fmt.Errorf("encode header: %w", err)
+		}
+		if _, err := writer.WriteAt(hdrBytes, 0); err != nil {
+			reader.Close()
+			writer.Close()
+			root.Close()
+			return nil, fmt.Errorf("write header: %w", err)
+		}
+	}
 
 	if config.BloomFilter {
 		db.bloom = newBloom()
@@ -217,7 +235,7 @@ func (db *DB) Close() error {
 
 	if db.header.Error == 1 {
 		db.header.Error = 0
-		db.header.Count = int(db.count.Load())
+		db.header.State[stCount] = db.count.Load()
 		hdrBytes, err := db.header.encode()
 		if err != nil {
 			errs = append(errs, err)
@@ -251,20 +269,19 @@ func (db *DB) Close() error {
 
 // Count returns the current document count. This is a best-guess value
 // maintained incrementally by Set and Delete. It is corrected to an
-// accurate count during Compact or Repair. For databases created before
-// count tracking was added, it returns 0 until the first Compact.
+// accurate count during Compact or Repair.
 func (db *DB) Count() int { return int(db.count.Load()) }
 
-func (db *DB) heapEnd() int64 { return db.header.Heap }
+func (db *DB) heapEnd() int64 { return int64(db.header.State[stHeap]) }
 
-func (db *DB) indexStart() int64 { return db.header.Heap }
-func (db *DB) indexEnd() int64   { return db.header.Index }
+func (db *DB) indexStart() int64 { return int64(db.header.State[stHeap]) }
+func (db *DB) indexEnd() int64   { return int64(db.header.State[stIndex]) }
 
 func (db *DB) sparseStart() int64 {
-	if db.header.Index == 0 {
+	if db.header.State[stIndex] == 0 {
 		return HeaderSize
 	}
-	return db.header.Index
+	return int64(db.header.State[stIndex])
 }
 
 // blockWrite and blockRead acquire all three concurrency layers (state

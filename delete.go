@@ -15,11 +15,22 @@ func (db *DB) Delete(label string) error {
 	if err := db.blockWrite(); err != nil {
 		return err
 	}
-	defer func() {
-		db.mu.Unlock()
-		db.lock.Unlock()
-	}()
 
+	err := db.delete(label)
+
+	// Check threshold under lock, compact after release (see set.go).
+	compact := err == nil && db.shouldCompact()
+	db.mu.Unlock()
+	db.lock.Unlock()
+
+	if compact {
+		db.Compact()
+	}
+	return err
+}
+
+// delete performs the soft-removal. The write lock must be held.
+func (db *DB) delete(label string) error {
 	id := hash(label, db.header.Algorithm)
 
 	result := scan(db.reader, id, db.indexStart(), db.indexEnd(), TypeIndex)
@@ -32,7 +43,7 @@ func (db *DB) Delete(label string) error {
 			if err := blank(db, idx.Offset, result); err != nil {
 				return fmt.Errorf("delete: %w", err)
 			}
-			db.count.Add(-1)
+			db.count.Add(^uint64(0)) // unsigned decrement: ^uint64(0) == max uint64 == -1 in twos-complement
 			return nil
 		}
 	}
@@ -53,7 +64,7 @@ func (db *DB) Delete(label string) error {
 			if err := blank(db, idx.Offset, &result); err != nil {
 				return fmt.Errorf("delete: %w", err)
 			}
-			db.count.Add(-1)
+			db.count.Add(^uint64(0)) // unsigned decrement
 			return nil
 		}
 	}

@@ -37,13 +37,13 @@ func TestRepairSortsData(t *testing.T) {
 
 	// After repair, data section should be sorted
 	// Verify by checking header boundaries are set
-	if db.header.Heap == 0 {
-		t.Error("header.Heap not set after repair")
+	if db.header.State[stHeap] == 0 {
+		t.Error("State[stHeap] not set after repair")
 	}
-	if db.header.Index == 0 {
-		t.Error("header.Index not set after repair")
+	if db.header.State[stIndex] == 0 {
+		t.Error("State[stIndex] not set after repair")
 	}
-	if db.header.Heap >= db.header.Index {
+	if db.header.State[stHeap] >= db.header.State[stIndex] {
 		t.Error("data section should end before index section")
 	}
 }
@@ -89,27 +89,27 @@ func TestRepairWithPurgeHistory(t *testing.T) {
 }
 
 // TestRepairUpdatesHeader verifies that Repair writes correct section
-// boundaries into the header. Before compaction, Heap and Index are
-// both zero (all records live in the sparse region). After compaction,
-// Heap must point to the start of the data section and Index to the
-// start of the index section. If either were wrong, binary search
-// would operate on the wrong byte range and miss every document.
+// boundaries into the header. Before compaction, heap and index offsets
+// are both zero (all records live in the sparse region). After compaction,
+// they must point to the correct section boundaries. If either were wrong,
+// binary search would operate on the wrong byte range and miss every
+// document.
 func TestRepairUpdatesHeader(t *testing.T) {
 	db := openTestDB(t)
 
 	db.Set("doc", "content")
 
-	if db.header.Heap != 0 {
-		t.Error("header.Heap should be 0 before repair")
+	if db.header.State[stHeap] != 0 {
+		t.Error("State[stHeap] should be 0 before repair")
 	}
 
 	db.Repair(nil)
 
-	if db.header.Heap == 0 {
-		t.Error("header.Heap should be set after repair")
+	if db.header.State[stHeap] == 0 {
+		t.Error("State[stHeap] should be set after repair")
 	}
-	if db.header.Index == 0 {
-		t.Error("header.Index should be set after repair")
+	if db.header.State[stIndex] == 0 {
+		t.Error("State[stIndex] should be set after repair")
 	}
 	if db.header.Error != 0 {
 		t.Error("header.Error should be 0 after repair")
@@ -246,7 +246,7 @@ func TestRepairAfterDelete(t *testing.T) {
 
 // TestRepairSparseEmptyAfter verifies that compaction moves all sparse
 // records into the sorted section, leaving the sparse region empty
-// (tail == header.Index). If sparse records were left behind, they
+// (tail == State[stIndex]). If sparse records were left behind, they
 // would be duplicated — once in the sorted section and once in sparse —
 // causing Get to return stale versions and History to show duplicates.
 func TestRepairSparseEmptyAfter(t *testing.T) {
@@ -255,9 +255,9 @@ func TestRepairSparseEmptyAfter(t *testing.T) {
 	db.Set("doc", "content")
 	db.Repair(nil)
 
-	// tail should equal header.Index (sparse section empty)
-	if db.tail != db.header.Index {
-		t.Errorf("tail = %d, want %d (header.Index)", db.tail, db.header.Index)
+	// tail should equal State[stIndex] (sparse section empty)
+	if db.tail != int64(db.header.State[stIndex]) {
+		t.Errorf("tail = %d, want %d (State[stIndex])", db.tail, db.header.State[stIndex])
 	}
 }
 
@@ -341,7 +341,7 @@ func TestCompactClosed(t *testing.T) {
 
 // TestCompactThenSet verifies that new writes after compaction land in
 // the sparse region and are still accessible alongside sorted data.
-// After Compact, the sparse region is empty (tail == header.Index).
+// After Compact, the sparse region is empty (tail == State[stIndex]).
 // A subsequent Set must append past the index section. If Set
 // miscalculated the tail offset, it would overwrite sorted indexes,
 // corrupting the lookup table for every existing document.

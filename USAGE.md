@@ -7,7 +7,7 @@ Folio stores data as JSONL (JSON Lines), making files accessible to standard Uni
 A folio file contains a header and three record types:
 
 ```
-{"_v":2,"_e":0,"_alg":1,"_ts":...,"_h":0,"_d":0,"_i":0}                          Header (line 1, 128 bytes)
+{"_v":1,"_e":0,"_alg":1,"_ts":...,"_s":[0,0,0,0,0,0]}                            Header (line 1, 128 bytes)
 {"_r":2,"_id":"a1b2...","_ts":...,"_l":"my-doc","_d":"content...","_h":"..."}     Data record (current)
 {"_r":3,"_id":"a1b2...","_ts":...,"_l":"my-doc","_d":"","_h":"..."}               History record (previous version)
 {"_r":1,"_id":"a1b2...","_ts":...,"_o":128,"_l":"my-doc"}                         Index record (pointer)

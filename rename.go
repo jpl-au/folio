@@ -36,11 +36,22 @@ func (db *DB) Rename(old, new string) error {
 	if err := db.blockWrite(); err != nil {
 		return err
 	}
-	defer func() {
-		db.mu.Unlock()
-		db.lock.Unlock()
-	}()
 
+	err := db.rename(old, new)
+
+	// Check threshold under lock, compact after release (see set.go).
+	compact := err == nil && db.shouldCompact()
+	db.mu.Unlock()
+	db.lock.Unlock()
+
+	if compact {
+		db.Compact()
+	}
+	return err
+}
+
+// rename performs the label change. The write lock must be held.
+func (db *DB) rename(old, new string) error {
 	sz, err := size(db.reader)
 	if err != nil {
 		return fmt.Errorf("rename: stat: %w", err)
