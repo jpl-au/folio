@@ -1,6 +1,13 @@
 // Search over document content and labels.
 //
 // Search scans data records (_r=2) and matches against the _d field.
+// After compaction the file has three sections: heap (data + history),
+// index, and sparse. Search only needs the heap and sparse regions —
+// the index section contains no _d fields. The scan skips the index
+// section entirely by reading [HeaderSize..heapEnd) then [sparseStart..EOF).
+// Before any compaction both boundaries are zero, so the first range is
+// empty and the second covers the whole file — identical to a full scan.
+//
 // Literal patterns (no regex metacharacters) take a fast path: the query
 // is JSON-escaped and matched with bytes.Contains, avoiding both regex
 // overhead and the need to unescape record content. Patterns containing
@@ -21,7 +28,9 @@
 // typically short and the allocation is bounded to the _d field, not the
 // full record line. Revisit if profiling shows GC pressure from search.
 //
-// MatchLabel scans index records (_r=1) and matches against _l.
+// MatchLabel scans index records (_r=1) and matches against _l. It scans
+// only the index section and sparse region, skipping the heap entirely.
+//
 // Both stream through the file line-by-line to avoid loading it into memory.
 // Callers consume results lazily via range and can break early to stop the
 // scan without reading the rest of the file.
@@ -99,43 +108,59 @@ func (db *DB) Search(pattern string, opts SearchOptions) iter.Seq2[Match, error]
 			yield(Match{}, fmt.Errorf("search: stat: %w", err))
 			return
 		}
-		section := io.NewSectionReader(db.reader, HeaderSize, sz-HeaderSize)
-		scanner := bufio.NewScanner(section)
-		scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
-
-		offset := int64(HeaderSize)
 
 		dTag := []byte(`"_d":"`)
 		hTag := []byte(`","_h":"`)
 
-		for scanner.Scan() {
-			ln := scanner.Bytes()
+		// scanRegion scans [start, end) for data records matching the
+		// pattern. Returns false if the caller broke out of the range loop.
+		scanRegion := func(start, end int64) bool {
+			if start >= end {
+				return true
+			}
+			section := io.NewSectionReader(db.reader, start, end-start)
+			scanner := bufio.NewScanner(section)
+			scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
+			offset := start
 
-			if valid(ln) && len(ln) >= MinRecordSize && ln[TypePos] == byte('0'+TypeRecord) {
-				di := bytes.Index(ln, dTag)
-				if di >= 0 {
-					start := di + len(dTag)
-					hi := bytes.Index(ln[start:], hTag)
-					if hi >= 0 {
-						content := ln[start : start+hi]
-						if decode {
-							content = unescape(content)
-						}
-						if match(content) {
-							if !yield(Match{Label: label(ln), Offset: offset}, nil) {
-								return
+			for scanner.Scan() {
+				ln := scanner.Bytes()
+
+				if valid(ln) && len(ln) >= MinRecordSize && ln[TypePos] == byte('0'+TypeRecord) {
+					di := bytes.Index(ln, dTag)
+					if di >= 0 {
+						s := di + len(dTag)
+						hi := bytes.Index(ln[s:], hTag)
+						if hi >= 0 {
+							content := ln[s : s+hi]
+							if decode {
+								content = unescape(content)
+							}
+							if match(content) {
+								if !yield(Match{Label: label(ln), Offset: offset}, nil) {
+									return false
+								}
 							}
 						}
 					}
 				}
+
+				offset += int64(len(ln)) + 1
 			}
 
-			offset += int64(len(ln)) + 1
+			if err := scanner.Err(); err != nil {
+				yield(Match{}, err)
+				return false
+			}
+			return true
 		}
 
-		if err := scanner.Err(); err != nil {
-			yield(Match{}, err)
+		// Heap: data + history records. Skip the index section.
+		if !scanRegion(HeaderSize, db.heapEnd()) {
+			return
 		}
+		// Sparse: unsorted appends since last compaction.
+		scanRegion(db.sparseStart(), sz)
 	}
 }
 
@@ -165,30 +190,46 @@ func (db *DB) MatchLabel(pattern string) iter.Seq2[Match, error] {
 			yield(Match{}, fmt.Errorf("matchlabel: stat: %w", err))
 			return
 		}
-		section := io.NewSectionReader(db.reader, 0, sz)
-		scanner := bufio.NewScanner(section)
-		scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
 
-		var offset int64
+		// scanRegion scans [start, end) for index records matching the
+		// pattern. Returns false if the caller broke out of the range loop.
+		scanRegion := func(start, end int64) bool {
+			if start >= end {
+				return true
+			}
+			section := io.NewSectionReader(db.reader, start, end-start)
+			scanner := bufio.NewScanner(section)
+			scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
+			offset := start
 
-		for scanner.Scan() {
-			line := scanner.Bytes()
+			for scanner.Scan() {
+				ln := scanner.Bytes()
 
-			if len(line) > TypePos && line[TypePos] == '1' {
-				loc := re.FindIndex(line)
-				if loc != nil {
-					lbl := label(line)
-					if !yield(Match{Label: lbl, Offset: offset + int64(loc[0])}, nil) {
-						return
+				if len(ln) > TypePos && ln[TypePos] == '1' {
+					loc := re.FindIndex(ln)
+					if loc != nil {
+						lbl := label(ln)
+						if !yield(Match{Label: lbl, Offset: offset + int64(loc[0])}, nil) {
+							return false
+						}
 					}
 				}
+
+				offset += int64(len(ln)) + 1
 			}
 
-			offset += int64(len(line)) + 1
+			if err := scanner.Err(); err != nil {
+				yield(Match{}, err)
+				return false
+			}
+			return true
 		}
 
-		if err := scanner.Err(); err != nil {
-			yield(Match{}, err)
+		// Index section: sorted index records. Skip the heap.
+		if !scanRegion(db.indexStart(), db.indexEnd()) {
+			return
 		}
+		// Sparse: unsorted appends since last compaction.
+		scanRegion(db.sparseStart(), sz)
 	}
 }
