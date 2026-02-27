@@ -51,7 +51,6 @@ The roadmap has three phases:
    holds the database open for an extended period: cached statistics,
    event hooks, watch/subscribe.
 
-
 ## Install
 
 ```bash

@@ -10,6 +10,7 @@
 package folio
 
 import (
+	"fmt"
 	"iter"
 	"path/filepath"
 	"strings"
@@ -1152,5 +1153,117 @@ func TestAutoCompactThresholdPersists(t *testing.T) {
 
 	if db2.header.State[stThreshold] != 50 {
 		t.Errorf("State[stThreshold] = %d, want 50", db2.header.State[stThreshold])
+	}
+}
+
+// TestAutoCompactConfigOverride verifies that passing a different
+// AutoCompact value on re-open overwrites the stored threshold and
+// persists it to the header. This lets callers tune the threshold
+// between sessions without rebuilding the file.
+func TestAutoCompactConfigOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.folio")
+
+	db, _ := Open(path, Config{AutoCompact: 50})
+	db.Set("doc", "content")
+	db.Close()
+
+	// Re-open with a different threshold.
+	db2, _ := Open(path, Config{AutoCompact: 25})
+	defer db2.Close()
+
+	if db2.header.State[stThreshold] != 25 {
+		t.Errorf("State[stThreshold] = %d, want 25", db2.header.State[stThreshold])
+	}
+
+	// Close and re-open with Config{} — the 25 should have been
+	// written to the header and should survive without being repeated.
+	db2.Close()
+
+	db3, _ := Open(path, Config{})
+	defer db3.Close()
+
+	if db3.header.State[stThreshold] != 25 {
+		t.Errorf("after zero-config reopen: State[stThreshold] = %d, want 25", db3.header.State[stThreshold])
+	}
+}
+
+// TestAutoCompactDeleteDoesNotCount verifies that Delete does not
+// increment the write counter. Delete patches records in place via
+// writeAt rather than appending through raw(), so it does not grow
+// the sparse region and should not count toward the compaction
+// threshold.
+func TestAutoCompactDeleteDoesNotCount(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{AutoCompact: 5})
+	t.Cleanup(func() { db.Close() })
+
+	// 4 Sets (4 raw() calls), then a Delete (in-place patch, no raw()).
+	for i := range 4 {
+		db.Set(fmt.Sprintf("doc-%d", i), "content")
+	}
+	db.Delete("doc-0")
+
+	// Delete should not have pushed the counter to 5.
+	if db.header.State[stHeap] != 0 {
+		t.Error("compaction should not fire — Delete does not increment stWrites")
+	}
+
+	// One more Set should reach 5 and trigger compaction.
+	db.Set("doc-final", "content")
+	if db.header.State[stHeap] == 0 {
+		t.Error("compaction should fire after 5th raw() call")
+	}
+}
+
+// TestAutoCompactBatch verifies that auto-compaction fires after a
+// batch write that crosses the threshold. Each document in Batch
+// calls raw() once, so a batch of 5 with threshold 5 should trigger.
+func TestAutoCompactBatch(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{AutoCompact: 5})
+	t.Cleanup(func() { db.Close() })
+
+	db.Batch(
+		Document{Label: "a", Data: "1"},
+		Document{Label: "b", Data: "2"},
+		Document{Label: "c", Data: "3"},
+		Document{Label: "d", Data: "4"},
+		Document{Label: "e", Data: "5"},
+	)
+
+	if db.header.State[stHeap] == 0 {
+		t.Error("State[stHeap] should be set after auto-compaction via Batch")
+	}
+}
+
+// TestAutoCompactMultipleCycles verifies that auto-compaction fires
+// repeatedly, not just once. After the first compaction resets stWrites
+// to 0, subsequent writes should accumulate toward the threshold again
+// and trigger a second compaction.
+func TestAutoCompactMultipleCycles(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := Open(filepath.Join(dir, "test.folio"), Config{AutoCompact: 3})
+	t.Cleanup(func() { db.Close() })
+
+	// First cycle: 3 writes → compaction.
+	for i := range 3 {
+		db.Set("doc", strings.Repeat("a", i+1))
+	}
+	if db.header.State[stHeap] == 0 {
+		t.Fatal("first compaction did not fire")
+	}
+	firstHeap := db.header.State[stHeap]
+
+	// Second cycle: 3 more writes → compaction again.
+	for i := range 3 {
+		db.Set("doc", strings.Repeat("b", i+1))
+	}
+	if db.header.State[stWrites] != 0 {
+		t.Errorf("State[stWrites] = %d after second cycle, want 0", db.header.State[stWrites])
+	}
+	// Heap boundary should have changed because new data was compacted.
+	if db.header.State[stHeap] == firstHeap {
+		t.Error("State[stHeap] unchanged after second compaction")
 	}
 }
