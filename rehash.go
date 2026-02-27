@@ -5,16 +5,10 @@
 // overwrite each _id in place without moving or resizing any records —
 // no temp file, no rewrite, just a linear scan with targeted byte patches.
 //
-// Crash safety: Rehash is NOT crash-safe. It patches IDs directly via
-// WriteAt without setting the dirty flag (which is managed by raw()).
-// If the process crashes mid-rehash, the file contains a mix of old and
-// new algorithm IDs while the header may still reference the old algorithm.
-// Binary search will silently produce wrong results. Recovery requires a
-// manual Repair call. This is acceptable because Rehash is a rare,
-// operator-initiated maintenance operation — not part of normal writes.
-// A future improvement could set the dirty flag before patching and
-// clear it after the header update, so crash recovery triggers
-// automatically.
+// The dirty flag is set before any patches begin and cleared after the
+// header is updated. A crash mid-rehash leaves the flag set, so the next
+// Open triggers automatic Repair — which rebuilds all IDs from labels,
+// restoring consistency regardless of how many patches completed.
 package folio
 
 import "fmt"
@@ -38,6 +32,12 @@ func (db *DB) Rehash(newAlg int) error {
 		return fmt.Errorf("rehash: stat: %w", err)
 	}
 	entries := scanm(db.reader, HeaderSize, info.Size(), 0)
+
+	// Set dirty flag so a crash mid-patch triggers automatic Repair.
+	if err := dirty(db.writer, true); err != nil {
+		return fmt.Errorf("rehash: set dirty: %w", err)
+	}
+	db.header.Error = 1
 
 	cache := map[string]string{} // label→newID, avoids rehashing the same label twice
 
@@ -70,6 +70,12 @@ func (db *DB) Rehash(newAlg int) error {
 	if err := db.writer.Sync(); err != nil {
 		return fmt.Errorf("rehash: sync: %w", err)
 	}
+
+	// All patches and the header are on disk — clear the dirty flag.
+	if err := dirty(db.writer, false); err != nil {
+		return fmt.Errorf("rehash: clear dirty: %w", err)
+	}
+	db.header.Error = 0
 
 	return nil
 }
