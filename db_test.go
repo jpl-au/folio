@@ -652,6 +652,83 @@ func TestRenameListReflects(t *testing.T) {
 	}
 }
 
+// TestBatch verifies that Batch writes multiple documents under a
+// single lock hold. All documents must be readable after the call.
+func TestBatch(t *testing.T) {
+	db := openTestDB(t)
+
+	err := db.Batch(
+		Document{"a", "alpha"},
+		Document{"b", "bravo"},
+		Document{"c", "charlie"},
+	)
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+
+	for _, want := range []struct{ label, data string }{
+		{"a", "alpha"}, {"b", "bravo"}, {"c", "charlie"},
+	} {
+		data, err := db.Get(want.label)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", want.label, err)
+		}
+		if data != want.data {
+			t.Errorf("Get(%s) = %q, want %q", want.label, data, want.data)
+		}
+	}
+}
+
+// TestBatchUpdate verifies that Batch correctly retires old versions
+// when updating existing documents. The same document appearing twice
+// in the batch must yield only the last value.
+func TestBatchUpdate(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", "v1")
+	err := db.Batch(
+		Document{"doc", "v2"},
+		Document{"doc", "v3"},
+	)
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+
+	data, _ := db.Get("doc")
+	if data != "v3" {
+		t.Errorf("Get = %q, want %q", data, "v3")
+	}
+}
+
+// TestBatchValidation verifies that Batch validates all inputs
+// before writing any documents. If the second document has an invalid
+// label, the first must not be written.
+func TestBatchValidation(t *testing.T) {
+	db := openTestDB(t)
+
+	err := db.Batch(
+		Document{"valid", "content"},
+		Document{"", "content"},
+	)
+	if err != ErrInvalidLabel {
+		t.Errorf("Batch invalid: got %v, want ErrInvalidLabel", err)
+	}
+
+	_, err = db.Get("valid")
+	if err != ErrNotFound {
+		t.Errorf("Get(valid) after failed batch: got %v, want ErrNotFound", err)
+	}
+}
+
+// TestBatchEmpty verifies that Batch with no arguments is a no-op.
+func TestBatchEmpty(t *testing.T) {
+	db := openTestDB(t)
+
+	if err := db.Batch(); err != nil {
+		t.Errorf("Batch(): %v", err)
+	}
+}
+
 // TestHistoryMultiDocCompact verifies that History returns the correct
 // versions when multiple documents are interleaved in the heap after
 // compaction. The group() function walks forward through the sorted

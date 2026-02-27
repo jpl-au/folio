@@ -130,6 +130,7 @@ See [USAGE.md](USAGE.md) for command-line examples and
 
 ```go
 db.Set(label, content string) error          // Create or update
+db.Batch(docs ...Document) error           // Batch create or update
 db.Get(label string) (string, error)         // Retrieve content by label
 db.Delete(label string) error                // Soft delete (preserves history)
 db.Exists(label string) (bool, error)        // Check existence

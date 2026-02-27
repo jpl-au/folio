@@ -7,10 +7,13 @@
 // in _h is preserved so History can still retrieve the old content.
 // This approach avoids rewriting the file on every update while keeping
 // the latest version immediately accessible via the newest index.
+//
+// Batch amortises lock acquisition across multiple documents. All
+// inputs are validated before any writes begin — if validation fails,
+// no documents are written.
 package folio
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 )
@@ -18,6 +21,49 @@ import (
 // Set creates or updates a document. See the package comment for the
 // append-then-blank strategy.
 func (db *DB) Set(label, content string) error {
+	if err := validateDoc(label, content); err != nil {
+		return err
+	}
+
+	if err := db.blockWrite(); err != nil {
+		return err
+	}
+	defer func() {
+		db.mu.Unlock()
+		db.lock.Unlock()
+	}()
+
+	return db.setOne(label, content)
+}
+
+// Batch creates or updates multiple documents under a single lock
+// hold. All inputs are validated before any writes begin. Documents
+// are processed in slice order.
+func (db *DB) Batch(docs ...Document) error {
+	for _, d := range docs {
+		if err := validateDoc(d.Label, d.Data); err != nil {
+			return err
+		}
+	}
+
+	if err := db.blockWrite(); err != nil {
+		return err
+	}
+	defer func() {
+		db.mu.Unlock()
+		db.lock.Unlock()
+	}()
+
+	for _, d := range docs {
+		if err := db.setOne(d.Label, d.Data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateDoc checks label and content constraints before any write.
+func validateDoc(label, content string) error {
 	if label == "" {
 		return ErrInvalidLabel
 	}
@@ -30,59 +76,29 @@ func (db *DB) Set(label, content string) error {
 	if content == "" {
 		return ErrEmptyContent
 	}
+	return nil
+}
 
-	if err := db.blockWrite(); err != nil {
-		return err
-	}
-	defer func() {
-		db.mu.Unlock()
-		db.lock.Unlock()
-	}()
-
+// setOne writes a single document. The write lock must be held.
+func (db *DB) setOne(label, content string) error {
 	id := hash(label, db.header.Algorithm)
 
-	var old *Result
-	var oldIdx *Index
-
-	result := scan(db.reader, id, db.indexStart(), db.indexEnd(), TypeIndex)
-	if result != nil {
-		idx, err := decodeIndex(result.Data)
-		if err != nil {
-			return fmt.Errorf("set: %w", err)
-		}
-		if idx.Label == label {
-			old = result
-			oldIdx = idx
-		}
+	sz, err := size(db.reader)
+	if err != nil {
+		return fmt.Errorf("set: stat: %w", err)
 	}
 
-	if old == nil {
-		sz, err := size(db.reader)
-		if err != nil {
-			return fmt.Errorf("set: stat: %w", err)
-		}
-		// Reverse iterate: the sparse region is append-only, so the newest
-		// version is at the highest offset. Walking backwards finds the
-		// latest version first and breaks immediately.
-		results := sparse(db.reader, id, db.sparseStart(), sz, TypeIndex)
-		for i := len(results) - 1; i >= 0; i-- {
-			idx, err := decodeIndex(results[i].Data)
-			if err != nil {
-				return fmt.Errorf("set: %w", err)
-			}
-			if idx.Label == label {
-				old = &results[i]
-				oldIdx = idx
-				break
-			}
-		}
+	idxResult, idx, err := db.findIndex(id, label, sz)
+	if err != nil {
+		return fmt.Errorf("set: %w", err)
 	}
 
+	ts := now()
 	newRecord := &Record{
 		Type:      TypeRecord,
 		ID:        id,
 		Label:     label,
-		Timestamp: now(),
+		Timestamp: ts,
 		Data:      content,
 		History:   compress([]byte(content)),
 	}
@@ -91,7 +107,7 @@ func (db *DB) Set(label, content string) error {
 		Type:      TypeIndex,
 		ID:        id,
 		Label:     label,
-		Timestamp: now(),
+		Timestamp: ts,
 	}
 
 	if _, err := db.append(newRecord, newIndex); err != nil {
@@ -102,26 +118,10 @@ func (db *DB) Set(label, content string) error {
 		db.bloom.Add(id)
 	}
 
-	// Retire the previous version: retype to history, blank _d, erase index
-	if old != nil {
-		if err := db.writeAt(oldIdx.Offset+TypePos, []byte("3")); err != nil {
-			return fmt.Errorf("set: retype record: %w", err)
-		}
-
-		record, err := line(db.reader, oldIdx.Offset)
-		if err != nil {
-			return fmt.Errorf("set: read old record: %w", err)
-		}
-		dStart := strings.Index(string(record), `"_d":"`) + 6
-		dEnd := strings.Index(string(record), `","_h":"`)
-		if dStart > 5 && dEnd > dStart {
-			if err := db.writeAt(oldIdx.Offset+int64(dStart), bytes.Repeat([]byte(" "), dEnd-dStart)); err != nil {
-				return fmt.Errorf("set: blank content: %w", err)
-			}
-		}
-
-		if err := db.writeAt(old.Offset, bytes.Repeat([]byte(" "), old.Length)); err != nil {
-			return fmt.Errorf("set: erase index: %w", err)
+	// Retire the previous version.
+	if idxResult != nil {
+		if err := blank(db, idx.Offset, idxResult); err != nil {
+			return fmt.Errorf("set: %w", err)
 		}
 	}
 
