@@ -448,14 +448,12 @@ func TestGroupSkipsInvalidRecord(t *testing.T) {
 
 // --- List ---
 
-// Covers list.go line 30: decodeIndex fails during List.
-//
-// List scans the entire file for index records and decodes each one to
-// extract the label. A type-mismatched _o field causes the same
-// decode-succeeds-but-decodeIndex-fails scenario as the sparse Get test.
-// If List silently skipped corrupt indexes, the caller would see an
-// incomplete document listing with no indication that anything is wrong.
-func TestListCorruptIndex(t *testing.T) {
+// TestListCorruptIndexStillReturnsLabel verifies that List extracts
+// labels via byte scanning (label()) rather than JSON parsing. A record
+// with a corrupt _o field still has a valid _l, so List returns the
+// label successfully — the corruption only surfaces when Get tries to
+// follow the offset.
+func TestListCorruptIndexStillReturnsLabel(t *testing.T) {
 	db := openTestDB(t)
 	db.Set("a", "content")
 	db.Compact()
@@ -464,9 +462,18 @@ func TestListCorruptIndex(t *testing.T) {
 	bad := fmt.Sprintf(`{"_r":1,"_id":"%s","_ts":1234567890123,"_o":"bad","_l":"doc2"}`, id)
 	db.raw([]byte(bad))
 
-	_, err := collect(db.List())
-	if !errors.Is(err, ErrCorruptIndex) {
-		t.Errorf("got %v, want ErrCorruptIndex", err)
+	labels, err := collect(db.List())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, l := range labels {
+		if l == "doc2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("List should return label from record with corrupt _o")
 	}
 }
 

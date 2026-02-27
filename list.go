@@ -39,19 +39,12 @@ func (db *DB) List() iter.Seq2[string, error] {
 		for scanner.Scan() {
 			data := scanner.Bytes()
 
-			if valid(data) {
-				record, err := decode(data)
-				if err == nil && record.Type == TypeIndex {
-					idx, err := decodeIndex(data)
-					if err != nil {
-						yield("", fmt.Errorf("list: %w", err))
+			if valid(data) && len(data) >= MinRecordSize && data[TypePos] == byte('0'+TypeIndex) {
+				lbl := label(data)
+				if !seen[lbl] {
+					seen[lbl] = true
+					if !yield(lbl, nil) {
 						return
-					}
-					if !seen[idx.Label] {
-						seen[idx.Label] = true
-						if !yield(idx.Label, nil) {
-							return
-						}
 					}
 				}
 			}
