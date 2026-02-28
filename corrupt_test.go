@@ -103,7 +103,7 @@ func TestGetCorruptSortedRecordOffset(t *testing.T) {
 	// Read the index line, find the _o value, and replace its digits
 	// with 9s. Same length preserves JSON structure; the value is
 	// guaranteed past EOF for a file this small (~300 bytes).
-	data, _ := line(db.reader, db.indexStart())
+	data, _ := line(db.src(), db.indexStart())
 	marker := []byte(`"_o":`)
 	i := bytes.Index(data, marker)
 	if i == -1 {
@@ -351,7 +351,7 @@ func TestHistoryCorruptHistory(t *testing.T) {
 
 	// Find the _h field's value start position within the record and
 	// overwrite the first 5 bytes of the compressed payload.
-	data, _ := line(db.reader, HeaderSize)
+	data, _ := line(db.src(), HeaderSize)
 	i := bytes.Index(data, []byte(`"_h":"`))
 	if i == -1 {
 		t.Fatal("could not locate _h field in record at HeaderSize")
@@ -377,7 +377,7 @@ func TestHistoryCorruptLabel(t *testing.T) {
 	db.Set("doc", "content")
 	db.Compact()
 
-	data, _ := line(db.reader, HeaderSize)
+	data, _ := line(db.src(), HeaderSize)
 	i := bytes.Index(data, []byte(`"_l":"doc"`))
 	if i == -1 {
 		t.Fatal("could not locate _l field in record at HeaderSize")

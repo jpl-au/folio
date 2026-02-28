@@ -22,16 +22,17 @@ func (db *DB) Get(label string) (string, error) {
 	}()
 
 	id := hash(label, db.header.Algorithm)
+	s := db.src()
 
 	// Sorted index section — fast path after compaction
-	result := scan(db.reader, id, db.indexStart(), db.indexEnd(), TypeIndex)
+	result := scan(s, id, db.indexStart(), db.indexEnd(), TypeIndex)
 	if result != nil {
 		idx, err := decodeIndex(result.Data)
 		if err != nil {
 			return "", fmt.Errorf("get: %w", err)
 		}
 		if idx.Label == label {
-			content, err := line(db.reader, idx.Offset)
+			content, err := line(s, idx.Offset)
 			if err != nil {
 				return "", fmt.Errorf("get: read record: %w", err)
 			}
@@ -48,18 +49,14 @@ func (db *DB) Get(label string) (string, error) {
 	}
 
 	// Sparse region — reverse scan so the newest matching index wins
-	sz, err := size(db.reader)
-	if err != nil {
-		return "", fmt.Errorf("get: stat: %w", err)
-	}
-	results := sparse(db.reader, id, db.sparseStart(), sz, TypeIndex)
+	results := sparse(s, id, db.sparseStart(), s.sz, TypeIndex)
 	for i := len(results) - 1; i >= 0; i-- {
 		idx, err := decodeIndex(results[i].Data)
 		if err != nil {
 			return "", fmt.Errorf("get: %w", err)
 		}
 		if idx.Label == label {
-			content, err := line(db.reader, idx.Offset)
+			content, err := line(s, idx.Offset)
 			if err != nil {
 				return "", fmt.Errorf("get: read record: %w", err)
 			}
@@ -86,8 +83,9 @@ func (db *DB) Exists(label string) (bool, error) {
 	}()
 
 	id := hash(label, db.header.Algorithm)
+	s := db.src()
 
-	result := scan(db.reader, id, db.indexStart(), db.indexEnd(), TypeIndex)
+	result := scan(s, id, db.indexStart(), db.indexEnd(), TypeIndex)
 	if result != nil {
 		idx, err := decodeIndex(result.Data)
 		if err != nil {
@@ -102,11 +100,7 @@ func (db *DB) Exists(label string) (bool, error) {
 		return false, nil
 	}
 
-	sz, err := size(db.reader)
-	if err != nil {
-		return false, fmt.Errorf("exists: stat: %w", err)
-	}
-	results := sparse(db.reader, id, db.sparseStart(), sz, TypeIndex)
+	results := sparse(s, id, db.sparseStart(), s.sz, TypeIndex)
 	for i := len(results) - 1; i >= 0; i-- {
 		idx, err := decodeIndex(results[i].Data)
 		if err != nil {

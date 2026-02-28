@@ -175,11 +175,8 @@ func TestMalformedRecordSkippedInSparse(t *testing.T) {
 	db.raw([]byte("not valid json"))
 	db.raw([]byte(`{"_r":2,"_id":"0000000000000000","_ts":1234567890123,"_l":"another","_d":"data","_h":"hist"}`))
 
-	sz, err := size(db.reader)
-	if err != nil {
-		t.Fatalf("size: %v", err)
-	}
-	results := sparse(db.reader, "", HeaderSize, sz, TypeRecord)
+	s := db.src()
+	results := sparse(s, "", HeaderSize, s.sz, TypeRecord)
 
 	if len(results) < 1 {
 		t.Error("sparse should find valid records despite malformed line")
@@ -198,11 +195,8 @@ func TestMalformedRecordSkippedInScanm(t *testing.T) {
 	db.Set("valid", "content")
 	db.raw([]byte(`{short}`))
 
-	sz, err := size(db.reader)
-	if err != nil {
-		t.Fatalf("size: %v", err)
-	}
-	entries := scanm(db.reader, HeaderSize, sz, 0)
+	s := db.src()
+	entries := scanm(s, HeaderSize, s.sz, 0)
 
 	if len(entries) < 1 {
 		t.Error("scanm should find valid entries despite short line")

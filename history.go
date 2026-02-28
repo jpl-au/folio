@@ -43,12 +43,7 @@ func (db *DB) History(label string) iter.Seq2[Version, error] {
 		}()
 
 		id := hash(label, db.header.Algorithm)
-
-		sz, err := size(db.reader)
-		if err != nil {
-			yield(Version{}, fmt.Errorf("history: stat: %w", err))
-			return
-		}
+		s := db.src()
 
 		type versionWithOffset struct {
 			Version
@@ -57,11 +52,11 @@ func (db *DB) History(label string) iter.Seq2[Version, error] {
 		var versions []versionWithOffset
 
 		// Heap: binary search for the ID group, collect all contiguous records.
-		heapResults := group(db.reader, id, HeaderSize, db.heapEnd())
+		heapResults := group(s, id, HeaderSize, db.heapEnd())
 
 		// Sparse: linear scan for matching records of any data/history type.
 		for _, t := range []int{TypeRecord, TypeHistory} {
-			sparseResults := sparse(db.reader, id, db.sparseStart(), sz, t)
+			sparseResults := sparse(s, id, db.sparseStart(), s.sz, t)
 			heapResults = append(heapResults, sparseResults...)
 		}
 

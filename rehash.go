@@ -27,11 +27,8 @@ func (db *DB) Rehash(newAlg int) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	info, err := db.reader.Stat()
-	if err != nil {
-		return fmt.Errorf("rehash: stat: %w", err)
-	}
-	entries := scanm(db.reader, HeaderSize, info.Size(), 0)
+	s := source{db.reader, db.tail}
+	entries := scanm(s, HeaderSize, s.sz, 0)
 
 	// Set dirty flag so a crash mid-patch triggers automatic Repair.
 	if err := dirty(db.writer, true); err != nil {
@@ -44,7 +41,7 @@ func (db *DB) Rehash(newAlg int) error {
 	for _, entry := range entries {
 		lbl := entry.Label
 		if lbl == "" {
-			record, err := line(db.reader, entry.SrcOff)
+			record, err := line(s, entry.SrcOff)
 			if err != nil {
 				return fmt.Errorf("rehash: read record: %w", err)
 			}

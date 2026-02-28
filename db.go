@@ -44,6 +44,7 @@ type Config struct {
 	SyncWrites    bool // fsync after every write (durability vs throughput)
 	BloomFilter   bool // maintain bloom filter over the sparse region
 	AutoCompact   int  // compact every N writes; persisted to header, 0 = leave stored value unchanged
+	MMap          bool // memory-map the file for reads (unix only)
 }
 
 // DB is an open database handle. Two separate file descriptors are held
@@ -56,6 +57,7 @@ type DB struct {
 	name   string
 	reader *os.File  // read-only fd, shared by concurrent readers (ReadAt is position-independent)
 	writer *os.File  // read-write fd, used for appends and patches
+	mapped []byte    // mmap'd read region; nil when Config.MMap is false
 	lock   *fileLock // OS-level flock on the writer fd (see lock.go)
 	header *Header   // cached, rewritten on Repair/Rehash
 	config Config
@@ -189,9 +191,20 @@ func Open(path string, config Config) (*DB, error) {
 
 	if config.BloomFilter {
 		db.bloom = newBloom()
-		entries := scanm(reader, db.sparseStart(), info.Size(), TypeIndex)
+		s := source{reader, info.Size()}
+		entries := scanm(s, db.sparseStart(), info.Size(), TypeIndex)
 		for _, e := range entries {
 			db.bloom.Add(e.ID)
+		}
+	}
+
+	if config.MMap {
+		data, err := mmapFile(reader, info.Size())
+		if err != nil {
+			// Unsupported platform or empty file — fall back to file I/O.
+			db.config.MMap = false
+		} else {
+			db.mapped = data
 		}
 	}
 
@@ -246,6 +259,10 @@ func (db *DB) Close() error {
 			errs = append(errs, err)
 		}
 	}
+	if err := munmapFile(db.mapped); err != nil {
+		errs = append(errs, err)
+	}
+	db.mapped = nil
 	if err := db.reader.Close(); err != nil {
 		errs = append(errs, err)
 	}
@@ -282,6 +299,35 @@ func (db *DB) sparseStart() int64 {
 		return HeaderSize
 	}
 	return int64(db.header.State[stIndex])
+}
+
+// src returns a source for read-path operations. When mmap is enabled
+// it reads from the mapped region; otherwise from the read-only fd.
+func (db *DB) src() source {
+	if db.mapped != nil {
+		return source{mapped(db.mapped), int64(len(db.mapped))}
+	}
+	return source{db.reader, db.tail}
+}
+
+// remap replaces the current memory mapping with one covering the
+// full file. Must be called with db.mu held for writing — readers
+// hold references to the mapped slice via src(), and munmap would
+// invalidate them.
+func (db *DB) remap() error {
+	if !db.config.MMap {
+		return nil
+	}
+	if err := munmapFile(db.mapped); err != nil {
+		return fmt.Errorf("remap: munmap: %w", err)
+	}
+	data, err := mmapFile(db.reader, db.tail)
+	if err != nil {
+		db.mapped = nil
+		return fmt.Errorf("remap: mmap: %w", err)
+	}
+	db.mapped = data
+	return nil
 }
 
 // blockWrite and blockRead acquire all three concurrency layers (state

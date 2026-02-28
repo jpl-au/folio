@@ -19,7 +19,6 @@ import (
 	"bufio"
 	"cmp"
 	"io"
-	"os"
 	"slices"
 	"strconv"
 )
@@ -29,7 +28,7 @@ import (
 // inside a record, so we align to the nearest newline to find a valid pivot.
 // If the forward alignment fails (e.g. lands past end), we fall back to
 // scanning backwards for a pivot.
-func scan(f *os.File, id string, start, end int64, recordType int) *Result {
+func scan(s source, id string, start, end int64, recordType int) *Result {
 	if start >= end {
 		return nil
 	}
@@ -40,10 +39,10 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 	var pivot *Result
 	var pivotEnd int64
 
-	newlinePos, _ := align(f, mid)
+	newlinePos, _ := align(s, mid)
 	if newlinePos >= 0 && newlinePos+1 < end {
 		recordStart := newlinePos + 1
-		data, err := line(f, recordStart)
+		data, err := line(s, recordStart)
 		if err == nil && len(data) > 0 && valid(data) {
 			if len(data) >= MinRecordSize && (recordType == 0 || data[TypePos] == byte('0'+recordType)) {
 				id := string(data[IDStart:IDEnd])
@@ -54,7 +53,7 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 	}
 
 	if pivot == nil {
-		pivot = scanBack(f, mid, start, recordType)
+		pivot = scanBack(s, mid, start, recordType)
 		if pivot != nil {
 			pivotEnd = pivot.Offset + int64(pivot.Length) + 1
 		}
@@ -68,19 +67,19 @@ func scan(f *os.File, id string, start, end int64, recordType int) *Result {
 		return pivot
 	}
 	if id < pivot.ID {
-		return scan(f, id, start, pivot.Offset, recordType)
+		return scan(s, id, start, pivot.Offset, recordType)
 	}
-	return scan(f, id, pivotEnd, end, recordType)
+	return scan(s, id, pivotEnd, end, recordType)
 }
 
 // scanBack walks backwards byte-by-byte to find a valid pivot when the
 // forward alignment in scan lands outside the search range.
-func scanBack(f *os.File, pos, start int64, recordType int) *Result {
+func scanBack(s source, pos, start int64, recordType int) *Result {
 	var buf [1]byte
 	for pos > start {
 		pos--
 		for pos > start {
-			if _, err := f.ReadAt(buf[:], pos); err != nil {
+			if _, err := s.ReadAt(buf[:], pos); err != nil {
 				return nil
 			}
 			if buf[0] == '\n' {
@@ -94,7 +93,7 @@ func scanBack(f *os.File, pos, start int64, recordType int) *Result {
 			recordStart = start
 		}
 
-		data, err := line(f, recordStart)
+		data, err := line(s, recordStart)
 		if err != nil || !valid(data) {
 			continue
 		}
@@ -109,9 +108,9 @@ func scanBack(f *os.File, pos, start int64, recordType int) *Result {
 
 // scanFwd walks forward line-by-line. Used when we need the first record
 // of a given type in a region (e.g. finding the start of the index section).
-func scanFwd(f *os.File, pos, end int64, recordType int) *Result {
+func scanFwd(s source, pos, end int64, recordType int) *Result {
 	for pos < end {
-		data, err := line(f, pos)
+		data, err := line(s, pos)
 		if err != nil || len(data) == 0 {
 			break
 		}
@@ -132,12 +131,12 @@ func scanFwd(f *os.File, pos, end int64, recordType int) *Result {
 // (type-agnostic), then forward-scans to collect all contiguous records
 // sharing that ID. Returns them in file order (oldest first after
 // compaction). Used by History to collect all versions from the heap.
-func group(f *os.File, id string, start, end int64) []Result {
+func group(s source, id string, start, end int64) []Result {
 	if start >= end {
 		return nil
 	}
 
-	hit := scan(f, id, start, end, 0)
+	hit := scan(s, id, start, end, 0)
 	if hit == nil {
 		return nil
 	}
@@ -149,7 +148,7 @@ func group(f *os.File, id string, start, end int64) []Result {
 		prev := first - 1
 		var buf [1]byte
 		for prev > start {
-			if _, err := f.ReadAt(buf[:], prev-1); err != nil {
+			if _, err := s.ReadAt(buf[:], prev-1); err != nil {
 				break
 			}
 			if buf[0] == '\n' {
@@ -162,7 +161,7 @@ func group(f *os.File, id string, start, end int64) []Result {
 			recordStart = prev // byte after newline
 		}
 
-		data, err := line(f, recordStart)
+		data, err := line(s, recordStart)
 		if err != nil || !valid(data) || len(data) < MinRecordSize {
 			break
 		}
@@ -177,7 +176,7 @@ func group(f *os.File, id string, start, end int64) []Result {
 	var results []Result
 	pos := first
 	for pos < end {
-		data, err := line(f, pos)
+		data, err := line(s, pos)
 		if err != nil || len(data) == 0 {
 			break
 		}
@@ -201,10 +200,10 @@ func group(f *os.File, id string, start, end int64) []Result {
 // sparse linearly scans an unsorted region. Every record is JSON-parsed
 // because IDs are not in sorted order — there is no way to short-circuit.
 // Pass an empty id to collect all records of the given type (used by List).
-func sparse(f *os.File, id string, start, end int64, recordType int) []Result {
+func sparse(s source, id string, start, end int64, recordType int) []Result {
 	var results []Result
 
-	section := io.NewSectionReader(f, start, end-start)
+	section := io.NewSectionReader(s, start, end-start)
 	scanner := bufio.NewScanner(section)
 	scanner.Buffer(make([]byte, 64*1024), MaxRecordSize)
 	offset := start
@@ -235,10 +234,10 @@ func sparse(f *os.File, id string, start, end int64, recordType int) []Result {
 // and these fields are always serialised in the same order and width.
 // Pass recordType=0 to collect all types. Used by compaction and bloom
 // filter construction where only ID, type, and timestamp are needed.
-func scanm(f *os.File, start, end int64, recordType int) []Entry {
+func scanm(s source, start, end int64, recordType int) []Entry {
 	var entries []Entry
 
-	section := io.NewSectionReader(f, start, end-start)
+	section := io.NewSectionReader(s, start, end-start)
 	scanner := bufio.NewScanner(section)
 	scanner.Buffer(make([]byte, 64*1024), MaxRecordSize)
 	offset := start

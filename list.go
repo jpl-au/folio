@@ -3,7 +3,6 @@ package folio
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"iter"
 )
@@ -24,15 +23,10 @@ func (db *DB) List() iter.Seq2[string, error] {
 			db.lock.Unlock()
 		}()
 
-		sz, err := size(db.reader)
-		if err != nil {
-			yield("", fmt.Errorf("list: stat: %w", err))
-			return
-		}
-
+		s := db.src()
 		seen := make(map[string]bool)
 
-		section := io.NewSectionReader(db.reader, HeaderSize, sz-HeaderSize)
+		section := io.NewSectionReader(s, HeaderSize, s.sz-HeaderSize)
 		scanner := bufio.NewScanner(section)
 		scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
 

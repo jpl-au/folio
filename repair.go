@@ -99,6 +99,10 @@ func (db *DB) Repair(opts *CompactOptions) error {
 	}
 	defer db.mu.Unlock()
 
+	// Release the old mapping before closing its backing fd.
+	munmapFile(db.mapped)
+	db.mapped = nil
+
 	// Drain in-flight flock calls before closing the fd (see lock.go)
 	db.lock.setFile(nil)
 
@@ -133,6 +137,13 @@ func (db *DB) Repair(opts *CompactOptions) error {
 
 	db.tail = indexEnd
 
+	// Best effort: re-establish mmap over the new file. On failure,
+	// reads fall back to file I/O for the rest of the session.
+	if err := db.remap(); err != nil {
+		db.config.MMap = false
+		db.mapped = nil
+	}
+
 	if db.bloom != nil {
 		db.bloom.Reset()
 	}
@@ -144,11 +155,8 @@ func (db *DB) Repair(opts *CompactOptions) error {
 // write depending on BlockReaders). On success it syncs and closes tmp, and
 // returns the byte offset of the sparse region start for db.tail.
 func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
-	info, err := db.reader.Stat()
-	if err != nil {
-		return 0, fmt.Errorf("repair: stat: %w", err)
-	}
-	entries := scanm(db.reader, HeaderSize, info.Size(), 0)
+	s := source{db.reader, db.tail}
+	entries := scanm(s, HeaderSize, s.sz, 0)
 
 	// Split into heap (data+history) and indexes.
 	exclude := []int{}
@@ -178,7 +186,7 @@ func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
 	// Write heap: interleaved data + history sorted by ID then timestamp.
 	for i := range heap {
 		entry := &heap[i]
-		record, err := line(db.reader, entry.SrcOff)
+		record, err := line(s, entry.SrcOff)
 		if err != nil {
 			if opts.BlockReaders {
 				continue // crash recovery: salvage what we can

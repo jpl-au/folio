@@ -17,6 +17,9 @@ func (db *DB) Delete(label string) error {
 	}
 
 	err := db.delete(label)
+	if err == nil {
+		db.remap()
+	}
 
 	// Check threshold under lock, compact after release (see set.go).
 	compact := err == nil && db.shouldCompact()
@@ -32,8 +35,9 @@ func (db *DB) Delete(label string) error {
 // delete performs the soft-removal. The write lock must be held.
 func (db *DB) delete(label string) error {
 	id := hash(label, db.header.Algorithm)
+	s := source{db.reader, db.tail}
 
-	result := scan(db.reader, id, db.indexStart(), db.indexEnd(), TypeIndex)
+	result := scan(s, id, db.indexStart(), db.indexEnd(), TypeIndex)
 	if result != nil {
 		idx, err := decodeIndex(result.Data)
 		if err != nil {
@@ -48,12 +52,8 @@ func (db *DB) delete(label string) error {
 		}
 	}
 
-	sz, err := size(db.reader)
-	if err != nil {
-		return fmt.Errorf("delete: stat: %w", err)
-	}
 	// Reverse iterate: newest version is at the highest offset (see set.go).
-	results := sparse(db.reader, id, db.sparseStart(), sz, TypeIndex)
+	results := sparse(s, id, db.sparseStart(), s.sz, TypeIndex)
 	for i := len(results) - 1; i >= 0; i-- {
 		result := results[i]
 		idx, err := decodeIndex(result.Data)
@@ -81,7 +81,8 @@ func blank(db *DB, dataOff int64, idx *Result) error {
 		return fmt.Errorf("retype record: %w", err)
 	}
 
-	record, err := line(db.reader, dataOff)
+	s := source{db.reader, db.tail}
+	record, err := line(s, dataOff)
 	if err != nil {
 		return fmt.Errorf("read record: %w", err)
 	}

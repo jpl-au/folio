@@ -132,7 +132,7 @@ func TestAppend(t *testing.T) {
 	}
 
 	// Read Record back
-	data, _ := line(db.reader, offset)
+	data, _ := line(db.src(), offset)
 	if !valid(data) {
 		t.Error("appended record is not valid")
 	}
@@ -144,7 +144,7 @@ func TestAppend(t *testing.T) {
 
 	// Read Index back (offset + len(record) + 1)
 	idxOffset := offset + int64(len(data)) + 1
-	idxData, _ := line(db.reader, idxOffset)
+	idxData, _ := line(db.src(), idxOffset)
 	idxDecoded, _ := decodeIndex(idxData)
 
 	if idxDecoded.Label != "test" {
@@ -173,7 +173,7 @@ func TestWriteAtOverwrites(t *testing.T) {
 	db.writeAt(HeaderSize+8, []byte("3"))
 
 	// Read back
-	data, _ := line(db.reader, HeaderSize)
+	data, _ := line(db.src(), HeaderSize)
 	if data[8] != '3' {
 		t.Errorf("overwrite failed: got %q", string(data))
 	}

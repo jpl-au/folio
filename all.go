@@ -15,7 +15,6 @@ package folio
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"iter"
 )
@@ -41,11 +40,7 @@ func (db *DB) All() iter.Seq2[Document, error] {
 			db.lock.Unlock()
 		}()
 
-		sz, err := size(db.reader)
-		if err != nil {
-			yield(Document{}, fmt.Errorf("all: stat: %w", err))
-			return
-		}
+		s := db.src()
 
 		dTag := []byte(`"_d":"`)
 		hTag := []byte(`","_h":"`)
@@ -57,7 +52,7 @@ func (db *DB) All() iter.Seq2[Document, error] {
 			if start >= end {
 				return true
 			}
-			section := io.NewSectionReader(db.reader, start, end-start)
+			section := io.NewSectionReader(s, start, end-start)
 			scanner := bufio.NewScanner(section)
 			scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
 
@@ -95,6 +90,6 @@ func (db *DB) All() iter.Seq2[Document, error] {
 			return
 		}
 		// Sparse: unsorted appends since last compaction.
-		scanRegion(db.sparseStart(), sz)
+		scanRegion(db.sparseStart(), s.sz)
 	}
 }

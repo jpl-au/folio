@@ -1,12 +1,16 @@
 // Read primitive tests.
 //
-// The read layer has four operations: line (read one JSONL record at a
-// byte offset), align (find the next newline from a mid-line position),
-// size (return the file length), and position (return the current seek
-// offset). Every read operation in the database — Get, List, History,
-// Search, scan, sparse — ultimately calls line() to extract a single
-// record. align() is used by binary search to recover line boundaries
-// after seeking to the middle of a record.
+// The read layer has three core operations: line (read one JSONL record
+// at a byte offset), align (find the next newline from a mid-line
+// position), and position (return the current seek offset). Every read
+// operation in the database — Get, List, History, Search, scan, sparse
+// — ultimately calls line() to extract a single record. align() is used
+// by binary search to recover line boundaries after seeking to the
+// middle of a record.
+//
+// All read functions accept a source (an io.ReaderAt with a known size)
+// rather than *os.File directly. The fsrc() helper wraps a test file as
+// a source.
 //
 // These tests use raw files (not a full DB) to isolate the read
 // primitives from the write path. Each test verifies one specific
@@ -38,6 +42,13 @@ func createTestFile(t *testing.T, content string) *os.File {
 	return f
 }
 
+// fsrc wraps a test file as a source so existing tests compile after
+// the *os.File → source signature change.
+func fsrc(f *os.File) source {
+	info, _ := f.Stat()
+	return source{f, info.Size()}
+}
+
 // TestLineReadRecord verifies the basic case: reading the first line
 // from offset 0. If line() didn't start reading at the given offset,
 // it would skip bytes or include bytes from before the requested
@@ -45,7 +56,7 @@ func createTestFile(t *testing.T, content string) *os.File {
 func TestLineReadRecord(t *testing.T) {
 	f := createTestFile(t, "first line\nsecond line\nthird line\n")
 
-	data, err := line(f, 0)
+	data, err := line(fsrc(f), 0)
 	if err != nil {
 		t.Fatalf("line error: %v", err)
 	}
@@ -62,7 +73,7 @@ func TestLineReadFromOffset(t *testing.T) {
 	f := createTestFile(t, "first line\nsecond line\nthird line\n")
 
 	// Offset 11 is after "first line\n"
-	data, err := line(f, 11)
+	data, err := line(fsrc(f), 11)
 	if err != nil {
 		t.Fatalf("line error: %v", err)
 	}
@@ -78,7 +89,7 @@ func TestLineReadFromOffset(t *testing.T) {
 func TestLineStripsNewline(t *testing.T) {
 	f := createTestFile(t, "content\n")
 
-	data, err := line(f, 0)
+	data, err := line(fsrc(f), 0)
 	if err != nil {
 		t.Fatalf("line error: %v", err)
 	}
@@ -98,7 +109,7 @@ func TestLineStripsNewline(t *testing.T) {
 func TestLineAtEOF(t *testing.T) {
 	f := createTestFile(t, "content\n")
 
-	_, err := line(f, 8) // offset at EOF
+	_, err := line(fsrc(f), 8) // offset at EOF
 	if err == nil {
 		t.Error("expected error at EOF")
 	}
@@ -111,7 +122,7 @@ func TestLineAtEOF(t *testing.T) {
 func TestLineNoTrailingNewline(t *testing.T) {
 	f := createTestFile(t, "no newline")
 
-	data, err := line(f, 0)
+	data, err := line(fsrc(f), 0)
 	if err != nil {
 		t.Fatalf("line error: %v", err)
 	}
@@ -130,7 +141,7 @@ func TestLineNoTrailingNewline(t *testing.T) {
 func TestAlignFindNewline(t *testing.T) {
 	f := createTestFile(t, "first\nsecond\n")
 
-	pos, err := align(f, 0)
+	pos, err := align(fsrc(f), 0)
 	if err != nil {
 		t.Fatalf("align error: %v", err)
 	}
@@ -147,7 +158,7 @@ func TestAlignAtNewline(t *testing.T) {
 	f := createTestFile(t, "first\nsecond\n")
 
 	// Newline is at offset 5
-	pos, err := align(f, 5)
+	pos, err := align(fsrc(f), 5)
 	if err != nil {
 		t.Fatalf("align error: %v", err)
 	}
@@ -162,7 +173,7 @@ func TestAlignAtNewline(t *testing.T) {
 func TestAlignNoNewline(t *testing.T) {
 	f := createTestFile(t, "no newline")
 
-	pos, err := align(f, 0)
+	pos, err := align(fsrc(f), 0)
 	if err != nil {
 		t.Fatalf("align error: %v", err)
 	}
@@ -178,7 +189,7 @@ func TestAlignNoNewline(t *testing.T) {
 func TestAlignAtEOF(t *testing.T) {
 	f := createTestFile(t, "content\n")
 
-	pos, err := align(f, 8) // at EOF
+	pos, err := align(fsrc(f), 8) // at EOF
 	if err != nil {
 		t.Fatalf("align error: %v", err)
 	}
@@ -195,7 +206,7 @@ func TestAlignMultipleNewlines(t *testing.T) {
 	f := createTestFile(t, "a\nb\nc\n")
 
 	// Should find first newline at offset 1
-	pos, err := align(f, 0)
+	pos, err := align(fsrc(f), 0)
 	if err != nil {
 		t.Fatalf("align error: %v", err)
 	}
@@ -204,7 +215,7 @@ func TestAlignMultipleNewlines(t *testing.T) {
 	}
 
 	// From offset 2 should find newline at offset 3
-	pos, err = align(f, 2)
+	pos, err = align(fsrc(f), 2)
 	if err != nil {
 		t.Fatalf("align error: %v", err)
 	}
@@ -213,34 +224,25 @@ func TestAlignMultipleNewlines(t *testing.T) {
 	}
 }
 
-// TestSize verifies that size() returns the file length. The file size
-// determines the boundary of the sparse region — if size() were wrong,
-// sparse() would either stop scanning early (missing documents) or read
-// past the end of the file.
-func TestSize(t *testing.T) {
+// TestSourceSize verifies that a source wrapping a file reports the
+// correct size. The size determines the boundary of the sparse region.
+func TestSourceSize(t *testing.T) {
 	f := createTestFile(t, "hello world")
 
-	s, err := size(f)
-	if err != nil {
-		t.Fatalf("size: %v", err)
-	}
-	if s != 11 {
-		t.Errorf("size = %d, want 11", s)
+	s := fsrc(f)
+	if s.sz != 11 {
+		t.Errorf("source.sz = %d, want 11", s.sz)
 	}
 }
 
-// TestSizeEmpty verifies that size() returns 0 for an empty file. A
-// fresh database file (before any writes) is exactly HeaderSize bytes,
-// but this test uses a truly empty file to verify size() doesn't crash.
-func TestSizeEmpty(t *testing.T) {
+// TestSourceSizeEmpty verifies that a source wrapping an empty file
+// has size 0.
+func TestSourceSizeEmpty(t *testing.T) {
 	f := createTestFile(t, "")
 
-	s, err := size(f)
-	if err != nil {
-		t.Fatalf("size: %v", err)
-	}
-	if s != 0 {
-		t.Errorf("size(empty) = %d, want 0", s)
+	s := fsrc(f)
+	if s.sz != 0 {
+		t.Errorf("source.sz = %d, want 0", s.sz)
 	}
 }
 

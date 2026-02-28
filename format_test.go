@@ -22,11 +22,7 @@ import (
 // dbsize is a test helper that returns the database file size.
 func dbsize(t *testing.T, db *DB) int64 {
 	t.Helper()
-	s, err := size(db.reader)
-	if err != nil {
-		t.Fatalf("size: %v", err)
-	}
-	return s
+	return db.src().sz
 }
 
 // TestConstants guards every exported constant that is persisted on disk
@@ -150,7 +146,7 @@ func TestIndexRecordFormat(t *testing.T) {
 	db.Set("test", "content")
 
 	// Find index record
-	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeIndex)
+	results := sparse(db.src(), "", HeaderSize, dbsize(t, db), TypeIndex)
 	if len(results) == 0 {
 		t.Fatal("no index record found")
 	}
@@ -185,7 +181,7 @@ func TestDataRecordFormat(t *testing.T) {
 
 	db.Set("test", "content")
 
-	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeRecord)
+	results := sparse(db.src(), "", HeaderSize, dbsize(t, db), TypeRecord)
 	if len(results) == 0 {
 		t.Fatal("no data record found")
 	}
@@ -223,7 +219,7 @@ func TestHistoryRecordFormat(t *testing.T) {
 	db.Set("test", "v1")
 	db.Set("test", "v2") // v1 becomes history
 
-	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeHistory)
+	results := sparse(db.src(), "", HeaderSize, dbsize(t, db), TypeHistory)
 	if len(results) == 0 {
 		t.Fatal("no history record found")
 	}
@@ -344,7 +340,7 @@ func TestIDAtFixedPosition(t *testing.T) {
 
 	db.Set("test", "content")
 
-	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeRecord)
+	results := sparse(db.src(), "", HeaderSize, dbsize(t, db), TypeRecord)
 	if len(results) == 0 {
 		t.Fatal("no record found")
 	}
@@ -373,7 +369,7 @@ func TestTimestampAtFixedPosition(t *testing.T) {
 
 	db.Set("test", "content")
 
-	results := sparse(db.reader, "", HeaderSize, dbsize(t, db), TypeRecord)
+	results := sparse(db.src(), "", HeaderSize, dbsize(t, db), TypeRecord)
 	if len(results) == 0 {
 		t.Fatal("no record found")
 	}

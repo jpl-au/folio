@@ -39,7 +39,6 @@ package folio
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"iter"
 	"regexp"
@@ -103,11 +102,7 @@ func (db *DB) Search(pattern string, opts SearchOptions) iter.Seq2[Match, error]
 			decode = opts.Decode
 		}
 
-		sz, err := size(db.reader)
-		if err != nil {
-			yield(Match{}, fmt.Errorf("search: stat: %w", err))
-			return
-		}
+		s := db.src()
 
 		dTag := []byte(`"_d":"`)
 		hTag := []byte(`","_h":"`)
@@ -118,7 +113,7 @@ func (db *DB) Search(pattern string, opts SearchOptions) iter.Seq2[Match, error]
 			if start >= end {
 				return true
 			}
-			section := io.NewSectionReader(db.reader, start, end-start)
+			section := io.NewSectionReader(s, start, end-start)
 			scanner := bufio.NewScanner(section)
 			scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
 			offset := start
@@ -160,7 +155,7 @@ func (db *DB) Search(pattern string, opts SearchOptions) iter.Seq2[Match, error]
 			return
 		}
 		// Sparse: unsorted appends since last compaction.
-		scanRegion(db.sparseStart(), sz)
+		scanRegion(db.sparseStart(), s.sz)
 	}
 }
 
@@ -185,11 +180,7 @@ func (db *DB) MatchLabel(pattern string) iter.Seq2[Match, error] {
 			return
 		}
 
-		sz, err := size(db.reader)
-		if err != nil {
-			yield(Match{}, fmt.Errorf("matchlabel: stat: %w", err))
-			return
-		}
+		s := db.src()
 
 		// scanRegion scans [start, end) for index records matching the
 		// pattern. Returns false if the caller broke out of the range loop.
@@ -197,7 +188,7 @@ func (db *DB) MatchLabel(pattern string) iter.Seq2[Match, error] {
 			if start >= end {
 				return true
 			}
-			section := io.NewSectionReader(db.reader, start, end-start)
+			section := io.NewSectionReader(s, start, end-start)
 			scanner := bufio.NewScanner(section)
 			scanner.Buffer(make([]byte, db.config.ReadBuffer), db.config.MaxRecordSize)
 			offset := start
@@ -230,6 +221,6 @@ func (db *DB) MatchLabel(pattern string) iter.Seq2[Match, error] {
 			return
 		}
 		// Sparse: unsorted appends since last compaction.
-		scanRegion(db.sparseStart(), sz)
+		scanRegion(db.sparseStart(), s.sz)
 	}
 }

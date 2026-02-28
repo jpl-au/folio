@@ -30,6 +30,9 @@ func (db *DB) Set(label, content string) error {
 	}
 
 	err := db.setOne(label, content)
+	if err == nil {
+		db.remap()
+	}
 
 	// Check the compaction threshold while locks are held so the read
 	// of State is consistent. Compact() is called after releasing both
@@ -65,6 +68,9 @@ func (db *DB) Batch(docs ...Document) error {
 			break
 		}
 	}
+	if err == nil {
+		db.remap()
+	}
 
 	// Same pattern as Set: check threshold under lock, compact after release.
 	compact := err == nil && db.shouldCompact()
@@ -97,13 +103,9 @@ func validateDoc(label, content string) error {
 // setOne writes a single document. The write lock must be held.
 func (db *DB) setOne(label, content string) error {
 	id := hash(label, db.header.Algorithm)
+	s := source{db.reader, db.tail}
 
-	sz, err := size(db.reader)
-	if err != nil {
-		return fmt.Errorf("set: stat: %w", err)
-	}
-
-	idxResult, idx, err := db.findIndex(id, label, sz)
+	idxResult, idx, err := db.findIndex(id, label, s)
 	if err != nil {
 		return fmt.Errorf("set: %w", err)
 	}

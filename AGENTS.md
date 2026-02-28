@@ -14,6 +14,10 @@ system, no caching layer, and no subscription mechanism. These are
 deliberate omissions, not missing features — a process that opens a file
 for one lookup cannot amortise the cost of building such structures.
 
+For read-heavy workloads, `Config.MMap` enables memory-mapped reads via
+`mmap(2)` (unix only). This eliminates syscall overhead for point lookups
+and is automatically remapped after writes.
+
 When suggesting improvements, assume the caller opens the database, runs
 a small number of operations, and closes it. Do not propose features that
 only pay off for long-running processes (e.g. watch channels, in-memory

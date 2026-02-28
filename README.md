@@ -152,6 +152,7 @@ db, err := folio.Open("data/docs.folio", folio.Config{
     SyncWrites:    false,             // fsync after every write
     BloomFilter:   true,              // in-memory filter for sparse region
     AutoCompact:   50,                // compact every 50 writes (0 = disabled)
+    MMap:          true,              // memory-map for reads (unix only)
 })
 ```
 
@@ -161,6 +162,19 @@ By default, folio scans the sparse region linearly for every lookup that
 misses the sorted index. Enabling `BloomFilter` builds a small (~12KB)
 in-memory filter at Open that tracks which IDs exist in the sparse region.
 Lookups for absent documents skip the linear scan entirely.
+
+### Memory-Mapped I/O
+
+Enabling `MMap` memory-maps the database file for reads using `mmap(2)`.
+Reads are served directly from the OS page cache without syscall overhead,
+which benefits read-heavy workloads where the database is populated once
+and queried many times. Point lookups (Get after Compact) are ~7x faster
+with mmap enabled. Bulk scans (List, Search, All) see modest improvement
+since they are dominated by JSON parsing rather than I/O.
+
+The mapping is read-only (`PROT_READ | MAP_SHARED`) and remapped
+automatically after writes. Writes always go through the file descriptor.
+Unix only — on other platforms, `Open` silently ignores the option.
 
 ## Documentation
 
@@ -187,8 +201,8 @@ The roadmap has three phases:
 
 1. **Short-lived processes** (current) — disk I/O is the critical path.
    Open, operate, close. No persistent memory structures.
-2. **Bridging** — features useful to both short-lived and long-running
-   processes, such as memory-mapped I/O and batch writes.
+2. **Bridging** (in progress) — features useful to both short-lived and
+   long-running processes: batch writes and memory-mapped I/O.
 3. **Long-running processes** — memory-oriented features where a process
    holds the database open for an extended period: cached statistics,
    event hooks, watch/subscribe.

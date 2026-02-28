@@ -43,11 +43,11 @@ func createScanTestFile(t *testing.T, content string) *os.File {
 // if stat fails.
 func fsize(t *testing.T, f *os.File) int64 {
 	t.Helper()
-	s, err := size(f)
+	info, err := f.Stat()
 	if err != nil {
-		t.Fatalf("size: %v", err)
+		t.Fatalf("stat: %v", err)
 	}
-	return s
+	return info.Size()
 }
 
 // Helper to create sorted index records
@@ -72,7 +72,7 @@ func TestScanFindExisting(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	result := scan(f, "0000000000000002", 0, fsize(t, f), TypeIndex)
+	result := scan(fsrc(f), "0000000000000002", 0, fsize(t, f), TypeIndex)
 	if result == nil {
 		t.Fatal("expected to find record")
 	}
@@ -90,7 +90,7 @@ func TestScanNotFound(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	result := scan(f, "0000000000000002", 0, fsize(t, f), TypeIndex)
+	result := scan(fsrc(f), "0000000000000002", 0, fsize(t, f), TypeIndex)
 	if result != nil {
 		t.Error("expected nil for missing ID")
 	}
@@ -101,7 +101,7 @@ func TestScanNotFound(t *testing.T) {
 // compaction yet, so the sorted section is empty).
 func TestScanEmptyRange(t *testing.T) {
 	f := createScanTestFile(t, "")
-	result := scan(f, "anything", 0, 0, TypeIndex)
+	result := scan(fsrc(f), "anything", 0, 0, TypeIndex)
 	if result != nil {
 		t.Error("expected nil for empty range")
 	}
@@ -118,7 +118,7 @@ func TestScanFirstRecord(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	result := scan(f, "0000000000000001", 0, fsize(t, f), TypeIndex)
+	result := scan(fsrc(f), "0000000000000001", 0, fsize(t, f), TypeIndex)
 	if result == nil || result.ID != "0000000000000001" {
 		t.Error("failed to find first record")
 	}
@@ -134,7 +134,7 @@ func TestScanLastRecord(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	result := scan(f, "0000000000000003", 0, fsize(t, f), TypeIndex)
+	result := scan(fsrc(f), "0000000000000003", 0, fsize(t, f), TypeIndex)
 	if result == nil || result.ID != "0000000000000003" {
 		t.Error("failed to find last record")
 	}
@@ -151,7 +151,7 @@ func TestScanWrongType(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	result := scan(f, "0000000000000001", 0, fsize(t, f), TypeIndex)
+	result := scan(fsrc(f), "0000000000000001", 0, fsize(t, f), TypeIndex)
 	if result != nil {
 		t.Error("expected nil when record type doesn't match")
 	}
@@ -168,7 +168,7 @@ func TestScanBackFindRecord(t *testing.T) {
 	f := createScanTestFile(t, content)
 
 	// Start from end
-	result := scanBack(f, fsize(t, f), 0, TypeIndex)
+	result := scanBack(fsrc(f), fsize(t, f), 0, TypeIndex)
 	if result == nil {
 		t.Fatal("expected to find record")
 	}
@@ -182,7 +182,7 @@ func TestScanBackFindRecord(t *testing.T) {
 // read past offset 0 and panic.
 func TestScanBackNoRecord(t *testing.T) {
 	f := createScanTestFile(t, "")
-	result := scanBack(f, 0, 0, TypeIndex)
+	result := scanBack(fsrc(f), 0, 0, TypeIndex)
 	if result != nil {
 		t.Error("expected nil for empty file")
 	}
@@ -198,7 +198,7 @@ func TestScanFwdFindRecord(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	result := scanFwd(f, 0, fsize(t, f), TypeIndex)
+	result := scanFwd(fsrc(f), 0, fsize(t, f), TypeIndex)
 	if result == nil {
 		t.Fatal("expected to find record")
 	}
@@ -211,7 +211,7 @@ func TestScanFwdFindRecord(t *testing.T) {
 // range. This is the termination condition for forward scan.
 func TestScanFwdNoRecord(t *testing.T) {
 	f := createScanTestFile(t, "")
-	result := scanFwd(f, 0, 0, TypeIndex)
+	result := scanFwd(fsrc(f), 0, 0, TypeIndex)
 	if result != nil {
 		t.Error("expected nil for empty file")
 	}
@@ -229,7 +229,7 @@ func TestSparseFindByID(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	results := sparse(f, "0000000000000001", 0, fsize(t, f), TypeIndex)
+	results := sparse(fsrc(f), "0000000000000001", 0, fsize(t, f), TypeIndex)
 	if len(results) != 2 {
 		t.Errorf("got %d results, want 2", len(results))
 	}
@@ -245,7 +245,7 @@ func TestSparseEmptyIDReturnsAll(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	results := sparse(f, "", 0, fsize(t, f), TypeIndex)
+	results := sparse(fsrc(f), "", 0, fsize(t, f), TypeIndex)
 	if len(results) != 3 {
 		t.Errorf("got %d results, want 3", len(results))
 	}
@@ -261,12 +261,12 @@ func TestSparseFiltersByType(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	results := sparse(f, "", 0, fsize(t, f), TypeIndex)
+	results := sparse(fsrc(f), "", 0, fsize(t, f), TypeIndex)
 	if len(results) != 1 {
 		t.Errorf("got %d TypeIndex results, want 1", len(results))
 	}
 
-	results = sparse(f, "", 0, fsize(t, f), TypeRecord)
+	results = sparse(fsrc(f), "", 0, fsize(t, f), TypeRecord)
 	if len(results) != 1 {
 		t.Errorf("got %d TypeRecord results, want 1", len(results))
 	}
@@ -284,7 +284,7 @@ func TestSparseSkipsBlanked(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	results := sparse(f, "", 0, fsize(t, f), TypeIndex)
+	results := sparse(fsrc(f), "", 0, fsize(t, f), TypeIndex)
 	if len(results) != 2 {
 		t.Errorf("got %d results, want 2 (blanked skipped)", len(results))
 	}
@@ -302,7 +302,7 @@ func TestScanmExtractMetadata(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	entries := scanm(f, 0, fsize(t, f), 0) // 0 = all types
+	entries := scanm(fsrc(f), 0, fsize(t, f), 0) // 0 = all types
 	if len(entries) != 2 {
 		t.Fatalf("got %d entries, want 2", len(entries))
 	}
@@ -338,7 +338,7 @@ func TestScanmFilterByType(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	entries := scanm(f, 0, fsize(t, f), TypeIndex)
+	entries := scanm(fsrc(f), 0, fsize(t, f), TypeIndex)
 	if len(entries) != 1 {
 		t.Errorf("got %d entries, want 1", len(entries))
 	}
@@ -355,7 +355,7 @@ func TestScanmSkipsBlanked(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	entries := scanm(f, 0, fsize(t, f), TypeIndex)
+	entries := scanm(fsrc(f), 0, fsize(t, f), TypeIndex)
 	if len(entries) != 2 {
 		t.Errorf("got %d entries, want 2", len(entries))
 	}
@@ -371,7 +371,7 @@ func TestScanmSkipsShortRecords(t *testing.T) {
 
 	f := createScanTestFile(t, content)
 
-	entries := scanm(f, 0, fsize(t, f), 0)
+	entries := scanm(fsrc(f), 0, fsize(t, f), 0)
 	if len(entries) != 1 {
 		t.Errorf("got %d entries, want 1 (short skipped)", len(entries))
 	}
