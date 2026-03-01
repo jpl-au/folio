@@ -45,6 +45,7 @@ type Config struct {
 	BloomFilter   bool // maintain bloom filter over the sparse region
 	AutoCompact   int  // compact every N writes; persisted to header, 0 = leave stored value unchanged
 	MMap          bool // memory-map the file for reads (unix only)
+	Index         bool // maintain in-memory index for O(1) lookups
 }
 
 // DB is an open database handle. Two separate file descriptors are held
@@ -61,8 +62,9 @@ type DB struct {
 	lock   *fileLock // OS-level flock on the writer fd (see lock.go)
 	header *Header   // cached, rewritten on Repair/Rehash
 	config Config
-	bloom  *bloom // nil unless Config.BloomFilter is set
-	tail   int64  // next append position (current end of file)
+	bloom  *bloom           // nil unless Config.BloomFilter is set
+	index  map[string]int64 // nil unless Config.Index is set
+	tail   int64            // next append position (current end of file)
 	count  atomic.Uint64
 	state  atomic.Int32
 	// cond uses its own mutex, not db.mu, because sync.Cond requires a
@@ -82,6 +84,12 @@ func Open(path string, config Config) (*DB, error) {
 	name := filepath.Base(path)
 	if config.HashAlgorithm == 0 {
 		config.HashAlgorithm = AlgXXHash3
+	}
+	switch config.HashAlgorithm {
+	case AlgXXHash3, AlgFNV1a, AlgBlake2b:
+		// valid
+	default:
+		return nil, fmt.Errorf("open: unknown hash algorithm: %d", config.HashAlgorithm)
 	}
 	if config.ReadBuffer == 0 {
 		config.ReadBuffer = 64 * 1024
@@ -195,6 +203,15 @@ func Open(path string, config Config) (*DB, error) {
 		entries := scanm(s, db.sparseStart(), info.Size(), TypeIndex)
 		for _, e := range entries {
 			db.bloom.Add(e.ID)
+		}
+	}
+
+	if config.Index {
+		s := source{reader, info.Size()}
+		entries := scanm(s, HeaderSize, info.Size(), TypeIndex)
+		db.index = make(map[string]int64, len(entries))
+		for _, e := range entries {
+			db.index[e.ID] = e.SrcOff
 		}
 	}
 

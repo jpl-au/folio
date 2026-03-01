@@ -79,7 +79,7 @@ func (db *DB) rename(old, new string) error {
 
 	// Same-length labels: patch _id and _l in place.
 	if len(old) == len(new) {
-		return db.patchRename(idx.Offset, idxResult.Offset, newID, new)
+		return db.patchRename(oldID, idx.Offset, idxResult.Offset, newID, new)
 	}
 
 	// Different-length: append new record+index, blank old.
@@ -108,12 +108,18 @@ func (db *DB) rename(old, new string) error {
 		Timestamp: ts,
 	}
 
-	if _, err := db.append(newRecord, newIndex); err != nil {
+	_, idxOff, err := db.append(newRecord, newIndex)
+	if err != nil {
 		return fmt.Errorf("rename: %w", err)
 	}
 
 	if db.bloom != nil {
 		db.bloom.Add(newID)
+	}
+
+	if db.index != nil {
+		delete(db.index, oldID)
+		db.index[newID] = idxOff
 	}
 
 	if err := blank(db, idx.Offset, idxResult); err != nil {
@@ -124,14 +130,34 @@ func (db *DB) rename(old, new string) error {
 
 // findIndex locates the current index record for a label. Returns nil
 // Result if the document doesn't exist.
-func (db *DB) findIndex(id, label string, s source) (*Result, *Index, error) {
+func (db *DB) findIndex(id, lbl string, s source) (*Result, *Index, error) {
+	// In-memory index — direct offset lookup.
+	if db.index != nil {
+		off, ok := db.index[id]
+		if !ok {
+			return nil, nil, nil
+		}
+		data, err := line(s, off)
+		if err != nil {
+			return nil, nil, fmt.Errorf("findIndex: read: %w", err)
+		}
+		idx, err := decodeIndex(data)
+		if err != nil {
+			return nil, nil, err
+		}
+		if idx.Label != lbl {
+			return nil, nil, nil
+		}
+		return &Result{off, len(data), data, id}, idx, nil
+	}
+
 	result := scan(s, id, db.indexStart(), db.indexEnd(), TypeIndex)
 	if result != nil {
 		idx, err := decodeIndex(result.Data)
 		if err != nil {
 			return nil, nil, err
 		}
-		if idx.Label == label {
+		if idx.Label == lbl {
 			return result, idx, nil
 		}
 	}
@@ -142,7 +168,7 @@ func (db *DB) findIndex(id, label string, s source) (*Result, *Index, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		if idx.Label == label {
+		if idx.Label == lbl {
 			r := results[i]
 			return &r, idx, nil
 		}
@@ -154,7 +180,7 @@ func (db *DB) findIndex(id, label string, s source) (*Result, *Index, error) {
 // patchRename patches _id and _l in the data record at dataOff and the
 // index record at idxOff. Only valid when old and new labels have the
 // same byte length.
-func (db *DB) patchRename(dataOff, idxOff int64, newID, newLabel string) error {
+func (db *DB) patchRename(oldID string, dataOff, idxOff int64, newID, newLabel string) error {
 	s := source{db.reader, db.tail}
 	marker := []byte(`"_l":"`)
 
@@ -190,6 +216,11 @@ func (db *DB) patchRename(dataOff, idxOff int64, newID, newLabel string) error {
 
 	if db.bloom != nil {
 		db.bloom.Add(newID)
+	}
+
+	if db.index != nil {
+		delete(db.index, oldID)
+		db.index[newID] = idxOff
 	}
 	return nil
 }

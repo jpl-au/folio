@@ -40,13 +40,6 @@ func (db *DB) Rehash(newAlg int) error {
 
 	for _, entry := range entries {
 		lbl := entry.Label
-		if lbl == "" {
-			record, err := line(s, entry.SrcOff)
-			if err != nil {
-				return fmt.Errorf("rehash: read record: %w", err)
-			}
-			lbl = label(record)
-		}
 		if cache[lbl] == "" {
 			cache[lbl] = hash(lbl, newAlg)
 		}
@@ -73,6 +66,25 @@ func (db *DB) Rehash(newAlg int) error {
 		return fmt.Errorf("rehash: clear dirty: %w", err)
 	}
 	db.header.Error = 0
+
+	// Rebuild bloom and in-memory index with the new IDs.
+	if db.bloom != nil {
+		db.bloom.Reset()
+		s = source{db.reader, db.tail}
+		idxEntries := scanm(s, db.sparseStart(), s.sz, TypeIndex)
+		for _, e := range idxEntries {
+			db.bloom.Add(e.ID)
+		}
+	}
+
+	if db.index != nil {
+		s = source{db.reader, db.tail}
+		idxEntries := scanm(s, HeaderSize, s.sz, TypeIndex)
+		clear(db.index)
+		for _, e := range idxEntries {
+			db.index[e.ID] = e.SrcOff
+		}
+	}
 
 	return nil
 }

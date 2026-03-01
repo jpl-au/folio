@@ -127,12 +127,17 @@ func (db *DB) setOne(label, content string) error {
 		Timestamp: ts,
 	}
 
-	if _, err := db.append(newRecord, newIndex); err != nil {
+	_, idxOff, err := db.append(newRecord, newIndex)
+	if err != nil {
 		return fmt.Errorf("set: %w", err)
 	}
 
 	if db.bloom != nil {
 		db.bloom.Add(id)
+	}
+
+	if db.index != nil {
+		db.index[id] = idxOff
 	}
 
 	if idxResult == nil {

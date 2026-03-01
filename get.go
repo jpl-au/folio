@@ -24,6 +24,32 @@ func (db *DB) Get(label string) (string, error) {
 	id := hash(label, db.header.Algorithm)
 	s := db.src()
 
+	// In-memory index — O(1) lookup
+	if db.index != nil {
+		if off, ok := db.index[id]; ok {
+			data, err := line(s, off)
+			if err != nil {
+				return "", fmt.Errorf("get: read index: %w", err)
+			}
+			idx, err := decodeIndex(data)
+			if err != nil {
+				return "", fmt.Errorf("get: %w", err)
+			}
+			if idx.Label == label {
+				content, err := line(s, idx.Offset)
+				if err != nil {
+					return "", fmt.Errorf("get: read record: %w", err)
+				}
+				record, err := decode(content)
+				if err != nil {
+					return "", fmt.Errorf("get: %w", err)
+				}
+				return record.Data, nil
+			}
+		}
+		return "", ErrNotFound
+	}
+
 	// Sorted index section — fast path after compaction
 	result := scan(s, id, db.indexStart(), db.indexEnd(), TypeIndex)
 	if result != nil {
@@ -84,6 +110,23 @@ func (db *DB) Exists(label string) (bool, error) {
 
 	id := hash(label, db.header.Algorithm)
 	s := db.src()
+
+	// In-memory index — single read to verify label on collision.
+	if db.index != nil {
+		off, ok := db.index[id]
+		if !ok {
+			return false, nil
+		}
+		data, err := line(s, off)
+		if err != nil {
+			return false, fmt.Errorf("exists: read index: %w", err)
+		}
+		idx, err := decodeIndex(data)
+		if err != nil {
+			return false, fmt.Errorf("exists: %w", err)
+		}
+		return idx.Label == label, nil
+	}
 
 	result := scan(s, id, db.indexStart(), db.indexEnd(), TypeIndex)
 	if result != nil {

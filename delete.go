@@ -37,39 +37,24 @@ func (db *DB) delete(label string) error {
 	id := hash(label, db.header.Algorithm)
 	s := source{db.reader, db.tail}
 
-	result := scan(s, id, db.indexStart(), db.indexEnd(), TypeIndex)
-	if result != nil {
-		idx, err := decodeIndex(result.Data)
-		if err != nil {
-			return fmt.Errorf("delete: %w", err)
-		}
-		if idx.Label == label {
-			if err := blank(db, idx.Offset, result); err != nil {
-				return fmt.Errorf("delete: %w", err)
-			}
-			db.count.Add(^uint64(0)) // unsigned decrement: ^uint64(0) == max uint64 == -1 in twos-complement
-			return nil
-		}
+	idxResult, idx, err := db.findIndex(id, label, s)
+	if err != nil {
+		return fmt.Errorf("delete: %w", err)
+	}
+	if idxResult == nil {
+		return ErrNotFound
 	}
 
-	// Reverse iterate: newest version is at the highest offset (see set.go).
-	results := sparse(s, id, db.sparseStart(), s.sz, TypeIndex)
-	for i := len(results) - 1; i >= 0; i-- {
-		result := results[i]
-		idx, err := decodeIndex(result.Data)
-		if err != nil {
-			return fmt.Errorf("delete: %w", err)
-		}
-		if idx.Label == label {
-			if err := blank(db, idx.Offset, &result); err != nil {
-				return fmt.Errorf("delete: %w", err)
-			}
-			db.count.Add(^uint64(0)) // unsigned decrement
-			return nil
-		}
+	if err := blank(db, idx.Offset, idxResult); err != nil {
+		return fmt.Errorf("delete: %w", err)
 	}
 
-	return ErrNotFound
+	if db.index != nil {
+		delete(db.index, id)
+	}
+
+	db.count.Add(^uint64(0)) // unsigned decrement
+	return nil
 }
 
 // blank retires a record: patches its type from Record to History (2→3),

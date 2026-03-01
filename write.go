@@ -7,6 +7,8 @@
 package folio
 
 import (
+	"fmt"
+
 	json "github.com/goccy/go-json"
 )
 
@@ -15,7 +17,9 @@ import (
 func (db *DB) raw(line []byte) (int64, error) {
 	if db.header.Error == 0 {
 		db.header.Error = 1
-		dirty(db.writer, true)
+		if err := dirty(db.writer, true); err != nil {
+			return 0, fmt.Errorf("raw: set dirty flag: %w", err)
+		}
 	}
 	// Every raw write increments the write counter so shouldCompact()
 	// can fire auto-compaction when the counter hits the threshold modulus.
@@ -40,11 +44,11 @@ func (db *DB) raw(line []byte) (int64, error) {
 // append writes a data Record and its Index as a single batch. Both are
 // concatenated into one buffer so a single WriteAt call places them
 // adjacently — if the process crashes mid-write, repair will discard
-// any incomplete trailing line.
-func (db *DB) append(record *Record, idx *Index) (int64, error) {
+// any incomplete trailing line. Returns the data offset and index offset.
+func (db *DB) append(record *Record, idx *Index) (int64, int64, error) {
 	rData, err := json.Marshal(record)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	dataOffset := db.tail
@@ -52,8 +56,10 @@ func (db *DB) append(record *Record, idx *Index) (int64, error) {
 
 	iData, err := json.Marshal(idx)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
+
+	idxOffset := dataOffset + int64(len(rData)) + 1 // +1 for newline between record and index
 
 	combined := make([]byte, 0, len(rData)+1+len(iData)+1)
 	combined = append(combined, rData...)
@@ -62,10 +68,10 @@ func (db *DB) append(record *Record, idx *Index) (int64, error) {
 	// raw() appends the final newline
 
 	if _, err := db.raw(combined); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
-	return dataOffset, nil
+	return dataOffset, idxOffset, nil
 }
 
 // shouldCompact reports whether the write counter has hit the auto-

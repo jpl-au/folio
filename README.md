@@ -153,6 +153,7 @@ db, err := folio.Open("data/docs.folio", folio.Config{
     BloomFilter:   true,              // in-memory filter for sparse region
     AutoCompact:   50,                // compact every 50 writes (0 = disabled)
     MMap:          true,              // memory-map for reads (unix only)
+    Index:         true,              // in-memory index for O(1) lookups
 })
 ```
 
@@ -175,6 +176,18 @@ since they are dominated by JSON parsing rather than I/O.
 The mapping is read-only (`PROT_READ | MAP_SHARED`) and remapped
 automatically after writes. Writes always go through the file descriptor.
 Unix only — on other platforms, `Open` silently ignores the option.
+
+### In-Memory Index
+
+Enabling `Index` builds a `map[string]int64` at Open that maps each
+document's hex ID to the byte offset of its index record. Get and Exists
+become O(1) lookups with a single file read instead of binary search plus
+sparse scan. The index is maintained automatically across Set, Delete, and
+Rename, and rebuilt after Compact and Rehash.
+
+The trade-off is memory: one map entry (~80 bytes) per document. For
+databases with millions of documents this may be significant. The bloom
+filter is a lighter alternative that only accelerates negative lookups.
 
 ## Documentation
 

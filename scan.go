@@ -19,7 +19,6 @@ import (
 	"bufio"
 	"cmp"
 	"io"
-	"slices"
 	"strconv"
 )
 
@@ -251,11 +250,7 @@ func scanm(s source, start, end int64, recordType int) []Entry {
 			if recordType == 0 || t == recordType {
 				id := string(ln[IDStart:IDEnd])
 				ts, _ := strconv.ParseInt(string(ln[TSStart:TSEnd]), 10, 64)
-				lbl := ""
-				if t == TypeIndex {
-					lbl = label(ln)
-				}
-				entries = append(entries, Entry{id, ts, t, offset, 0, length, lbl})
+				entries = append(entries, Entry{id, ts, t, offset, 0, length, label(ln)})
 			}
 		}
 
@@ -263,20 +258,6 @@ func scanm(s source, start, end int64, recordType int) []Entry {
 	}
 
 	return entries
-}
-
-// unpack splits entries for compaction: indexes go to one slice, everything
-// else to data. The exclude list lets callers drop specific types (e.g.
-// TypeHistory during purge).
-func unpack(entries []Entry, exclude ...int) (data, indexes []Entry) {
-	for _, e := range entries {
-		if e.Type == TypeIndex {
-			indexes = append(indexes, e)
-		} else if !slices.Contains(exclude, e.Type) {
-			data = append(data, e)
-		}
-	}
-	return data, indexes
 }
 
 // byIDThenTS sorts entries for compaction output. Records with the same ID

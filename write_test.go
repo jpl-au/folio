@@ -126,7 +126,7 @@ func TestAppend(t *testing.T) {
 		Label:     "test",
 	}
 
-	offset, err := db.append(record, idx)
+	offset, _, err := db.append(record, idx)
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}

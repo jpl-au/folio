@@ -380,3 +380,125 @@ func TestCompactThenUpdate(t *testing.T) {
 		t.Errorf("Get = %q, want %q", data, "v2")
 	}
 }
+
+// TestRepairCrashDuringUpdate simulates a crash between the append and
+// blank steps of Set. This leaves two type 2 records and two indexes
+// for the same label. Before the fix, repair would write both type 2
+// records to the heap, causing All() to return the stale version.
+// The fix derives indexes from records: the later type 2 wins, the
+// earlier is retyped to history.
+func TestRepairCrashDuringUpdate(t *testing.T) {
+	db := openTestDB(t)
+
+	// Write initial version normally.
+	db.Set("doc", "v1")
+
+	// Simulate crash during update: append new record+index without
+	// blanking the old ones. This is what the file looks like if the
+	// process dies after step 2 of setOne() but before step 4.
+	id := hash("doc", db.header.Algorithm)
+	ts := now()
+	newRecord := &Record{
+		Type:      TypeRecord,
+		ID:        id,
+		Label:     "doc",
+		Timestamp: ts,
+		Data:      "v2",
+		History:   compress([]byte("v2")),
+	}
+	newIndex := &Index{
+		Type:      TypeIndex,
+		ID:        id,
+		Label:     "doc",
+		Timestamp: ts,
+	}
+	if _, _, err := db.append(newRecord, newIndex); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Now the file has two type 2 records and two indexes for "doc".
+	// Repair should resolve this: v2 wins, v1 becomes history.
+	if err := db.Repair(&CompactOptions{BlockReaders: true}); err != nil {
+		t.Fatalf("Repair: %v", err)
+	}
+
+	data, err := db.Get("doc")
+	if err != nil {
+		t.Fatalf("Get after repair: %v", err)
+	}
+	if data != "v2" {
+		t.Errorf("Get = %q, want %q (latest version)", data, "v2")
+	}
+
+	// Count should be 1 (one live document).
+	if db.Count() != 1 {
+		t.Errorf("Count = %d, want 1", db.Count())
+	}
+
+	// History should contain both versions.
+	versions, _ := collect(db.History("doc"))
+	if len(versions) != 2 {
+		t.Errorf("History: got %d versions, want 2", len(versions))
+	}
+}
+
+// TestRepairCrashDuringDelete simulates a crash between the type byte
+// patch and the index erase in delete(). This leaves a type 3 record
+// with a valid index still pointing to it. Before the fix, repair
+// would write an index with Offset: 0 (pointing at the header).
+// The fix derives indexes from records: no type 2 record for this
+// label means no output index — the document is treated as deleted.
+func TestRepairCrashDuringDelete(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("doc", "content")
+
+	// Simulate crash during delete: retype the record from 2→3 but
+	// leave the index intact. This is what blank() looks like if
+	// it crashes after step 1 (writeAt type byte) but before step 4
+	// (erase index).
+	id := hash("doc", db.header.Algorithm)
+	s := source{db.reader, db.tail}
+
+	// Find the data record and patch its type byte.
+	results := sparse(s, id, db.sparseStart(), s.sz, TypeRecord)
+	if len(results) == 0 {
+		t.Fatal("could not find data record to simulate crash")
+	}
+	db.writeAt(results[0].Offset+TypePos, []byte("3"))
+	// Index is intentionally NOT erased.
+
+	// Repair should recognise this as a deleted document.
+	if err := db.Repair(&CompactOptions{BlockReaders: true}); err != nil {
+		t.Fatalf("Repair: %v", err)
+	}
+
+	_, err := db.Get("doc")
+	if err != ErrNotFound {
+		t.Errorf("Get after repair: got %v, want ErrNotFound", err)
+	}
+
+	// Count should be 0.
+	if db.Count() != 0 {
+		t.Errorf("Count = %d, want 0", db.Count())
+	}
+}
+
+// TestRepairCount verifies that the document count in the header is
+// accurate after repair. The count is derived from the number of
+// type 2 records written to the output (the live map), not from the
+// input indexes which may be stale.
+func TestRepairCount(t *testing.T) {
+	db := openTestDB(t)
+
+	db.Set("a", "1")
+	db.Set("b", "2")
+	db.Set("c", "3")
+	db.Delete("b")
+
+	db.Repair(nil)
+
+	if db.Count() != 2 {
+		t.Errorf("Count = %d, want 2", db.Count())
+	}
+}

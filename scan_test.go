@@ -10,8 +10,7 @@
 // These tests use raw JSONL files (not a full DB) to isolate the scan
 // functions from the write path. Each test constructs a minimal file
 // with known IDs and record types, then verifies the scan function
-// returns the correct results. Also tested: the unpack helper that
-// separates indexes from data records, and the sort comparators
+// returns the correct results. Also tested: the sort comparators
 // (byIDThenTS, byID) that compaction uses to order the rebuilt heap.
 package folio
 
@@ -318,12 +317,12 @@ func TestScanmExtractMetadata(t *testing.T) {
 		t.Errorf("entry[0].Label = %q, want %q", entries[0].Label, "label-a")
 	}
 
-	// Check data entry (label only populated for index)
+	// Check data entry (label populated for all types)
 	if entries[1].Type != TypeRecord {
 		t.Errorf("entry[1].Type = %d, want %d", entries[1].Type, TypeRecord)
 	}
-	if entries[1].Label != "" {
-		t.Errorf("entry[1].Label = %q, want empty (non-index)", entries[1].Label)
+	if entries[1].Label != "label-b" {
+		t.Errorf("entry[1].Label = %q, want %q", entries[1].Label, "label-b")
 	}
 }
 
@@ -374,58 +373,6 @@ func TestScanmSkipsShortRecords(t *testing.T) {
 	entries := scanm(fsrc(f), 0, fsize(t, f), 0)
 	if len(entries) != 1 {
 		t.Errorf("got %d entries, want 1 (short skipped)", len(entries))
-	}
-}
-
-// TestUnpackSeparatesTypes verifies that unpack splits a mixed entry
-// list into data+history entries and index entries. Compaction needs
-// them separated: data entries are sorted and written as the heap,
-// index entries are generated fresh. If unpack mixed them, the rebuilt
-// file would have indexes in the heap and data in the index section.
-func TestUnpackSeparatesTypes(t *testing.T) {
-	entries := []Entry{
-		{Type: TypeIndex, ID: "1"},
-		{Type: TypeRecord, ID: "2"},
-		{Type: TypeHistory, ID: "3"},
-		{Type: TypeIndex, ID: "4"},
-	}
-
-	data, indexes := unpack(entries)
-
-	if len(indexes) != 2 {
-		t.Errorf("got %d indexes, want 2", len(indexes))
-	}
-	if len(data) != 2 {
-		t.Errorf("got %d data, want 2", len(data))
-	}
-}
-
-// TestUnpackExcludeHistory verifies that unpack can exclude specific
-// types. The PurgeHistory option passes TypeHistory to unpack's exclude
-// list, stripping old versions from the data set before rebuild. If
-// the exclusion logic were inverted, purge would keep only history
-// records and discard all current data.
-func TestUnpackExcludeHistory(t *testing.T) {
-	entries := []Entry{
-		{Type: TypeRecord, ID: "1"},
-		{Type: TypeHistory, ID: "2"},
-		{Type: TypeRecord, ID: "3"},
-	}
-
-	data, _ := unpack(entries, TypeHistory)
-
-	if len(data) != 2 {
-		t.Errorf("got %d data after excluding history, want 2", len(data))
-	}
-}
-
-// TestUnpackEmpty verifies that unpack handles nil input without
-// panicking. This is the case for an empty database — scanm returns
-// no entries, and unpack must return nil slices rather than crashing.
-func TestUnpackEmpty(t *testing.T) {
-	data, indexes := unpack(nil)
-	if data != nil || indexes != nil {
-		t.Error("expected nil slices for empty input")
 	}
 }
 

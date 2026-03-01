@@ -16,7 +16,9 @@ for one lookup cannot amortise the cost of building such structures.
 
 For read-heavy workloads, `Config.MMap` enables memory-mapped reads via
 `mmap(2)` (unix only). This eliminates syscall overhead for point lookups
-and is automatically remapped after writes.
+and is automatically remapped after writes. `Config.Index` builds an
+in-memory lookup table at Open for O(1) Get and Exists — useful when a
+session performs many point lookups.
 
 When suggesting improvements, assume the caller opens the database, runs
 a small number of operations, and closes it. Do not propose features that
