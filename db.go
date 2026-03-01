@@ -1,4 +1,4 @@
-// Database lifecycle: open, close, crash recovery.
+// Core type definitions and structural helpers.
 //
 // Concurrency is managed in three layers, each serving a different scope:
 //
@@ -10,19 +10,20 @@
 //     Readers hold RLock; writers and Repair hold Lock.
 //
 //  3. OS file lock (db.lock): coordinates across processes via flock(2)
-//     or LockFileEx. See lock.go for lifetime management.
+//     or LockFileEx. See internal/flock for lifetime management.
 //
 // When an operation starts, it waits (via db.cond) until the state allows
 // it, then acquires the appropriate lock level at layers 2 and 3.
 package folio
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
+
+	"github.com/jpl-au/folio/internal/bloom"
+	"github.com/jpl-au/folio/internal/flock"
 )
 
 // State machine values. Transitions are monotonic during shutdown
@@ -56,13 +57,13 @@ type Config struct {
 type DB struct {
 	root   *os.Root
 	name   string
-	reader *os.File  // read-only fd, shared by concurrent readers (ReadAt is position-independent)
-	writer *os.File  // read-write fd, used for appends and patches
-	mapped []byte    // mmap'd read region; nil when Config.MMap is false
-	lock   *fileLock // OS-level flock on the writer fd (see lock.go)
-	header *Header   // cached, rewritten on Repair/Rehash
+	reader *os.File    // read-only fd, shared by concurrent readers (ReadAt is position-independent)
+	writer *os.File    // read-write fd, used for appends and patches
+	mapped []byte      // mmap'd read region; nil when Config.MMap is false
+	lock   *flock.Lock // OS-level flock on the writer fd (see internal/flock)
+	header *Header     // cached, rewritten on Repair/Rehash
 	config Config
-	bloom  *bloom           // nil unless Config.BloomFilter is set
+	bloom  *bloom.Filter    // nil unless Config.BloomFilter is set
 	index  map[string]int64 // nil unless Config.Index is set
 	tail   int64            // next append position (current end of file)
 	count  atomic.Uint64
@@ -73,224 +74,6 @@ type DB struct {
 	// transitions don't hold the RWMutex.
 	cond *sync.Cond
 	mu   sync.RWMutex // in-process read/write coordination
-}
-
-// Open opens or creates a database at the given path. If a previous
-// session crashed (dirty flag set, or .tmp file left behind), an automatic
-// Repair is attempted under an exclusive lock to restore consistency
-// before returning.
-func Open(path string, config Config) (*DB, error) {
-	dir := filepath.Dir(path)
-	name := filepath.Base(path)
-	if config.HashAlgorithm == 0 {
-		config.HashAlgorithm = AlgXXHash3
-	}
-	switch config.HashAlgorithm {
-	case AlgXXHash3, AlgFNV1a, AlgBlake2b:
-		// valid
-	default:
-		return nil, fmt.Errorf("open: unknown hash algorithm: %d", config.HashAlgorithm)
-	}
-	if config.ReadBuffer == 0 {
-		config.ReadBuffer = 64 * 1024
-	}
-	if config.MaxRecordSize == 0 {
-		config.MaxRecordSize = 16 * 1024 * 1024
-	}
-
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = root.Stat(name)
-	if os.IsNotExist(err) {
-		file, err := root.Create(name)
-		if err != nil {
-			root.Close()
-			return nil, err
-		}
-		hdr := Header{
-			Version:   1,
-			Timestamp: now(),
-			Algorithm: config.HashAlgorithm,
-		}
-		hdr.State[stThreshold] = uint64(config.AutoCompact)
-		buf, err := hdr.encode()
-		if err != nil {
-			file.Close()
-			root.Close()
-			return nil, fmt.Errorf("encode header: %w", err)
-		}
-		if _, err := file.Write(buf); err != nil {
-			file.Close()
-			root.Close()
-			return nil, fmt.Errorf("write header: %w", err)
-		}
-		if err := file.Sync(); err != nil {
-			file.Close()
-			root.Close()
-			return nil, fmt.Errorf("sync header: %w", err)
-		}
-		file.Close()
-	}
-
-	reader, err := root.OpenFile(name, os.O_RDONLY, 0644)
-	if err != nil {
-		root.Close()
-		return nil, err
-	}
-
-	writer, err := root.OpenFile(name, os.O_RDWR, 0644)
-	if err != nil {
-		reader.Close()
-		root.Close()
-		return nil, err
-	}
-
-	flock := &fileLock{f: writer}
-
-	info, err := writer.Stat()
-	if err != nil {
-		reader.Close()
-		writer.Close()
-		root.Close()
-		return nil, fmt.Errorf("stat: %w", err)
-	}
-	hdr, err := header(reader)
-	if err != nil {
-		reader.Close()
-		writer.Close()
-		root.Close()
-		return nil, err
-	}
-
-	db := &DB{
-		root:   root,
-		name:   name,
-		reader: reader,
-		writer: writer,
-		lock:   flock,
-		header: hdr,
-		config: config,
-		tail:   info.Size(),
-		cond:   sync.NewCond(&sync.Mutex{}),
-	}
-	db.count.Store(hdr.State[stCount])
-
-	// A non-zero AutoCompact is a deliberate change — persist it to the
-	// header so it survives future opens without needing to be repeated.
-	if config.AutoCompact > 0 && uint64(config.AutoCompact) != hdr.State[stThreshold] {
-		db.header.State[stThreshold] = uint64(config.AutoCompact)
-		hdrBytes, err := db.header.encode()
-		if err != nil {
-			reader.Close()
-			writer.Close()
-			root.Close()
-			return nil, fmt.Errorf("encode header: %w", err)
-		}
-		if _, err := writer.WriteAt(hdrBytes, 0); err != nil {
-			reader.Close()
-			writer.Close()
-			root.Close()
-			return nil, fmt.Errorf("write header: %w", err)
-		}
-	}
-
-	if config.BloomFilter {
-		db.bloom = newBloom()
-		s := source{reader, info.Size()}
-		entries := scanm(s, db.sparseStart(), info.Size(), TypeIndex)
-		for _, e := range entries {
-			db.bloom.Add(e.ID)
-		}
-	}
-
-	if config.Index {
-		s := source{reader, info.Size()}
-		entries := scanm(s, HeaderSize, info.Size(), TypeIndex)
-		db.index = make(map[string]int64, len(entries))
-		for _, e := range entries {
-			db.index[e.ID] = e.SrcOff
-		}
-	}
-
-	if config.MMap {
-		data, err := mmapFile(reader, info.Size())
-		if err != nil {
-			// Unsupported platform or empty file — fall back to file I/O.
-			db.config.MMap = false
-		} else {
-			db.mapped = data
-		}
-	}
-
-	// A leftover .tmp file or a dirty header means the previous session
-	// crashed mid-write. Repair rebuilds the file from its surviving records.
-	_, tmpErr := root.Stat(name + ".tmp")
-	tmpExists := tmpErr == nil
-	needsRepair := tmpExists || db.header.Error == 1
-
-	if needsRepair {
-		if tmpExists {
-			root.Remove(name + ".tmp")
-		}
-		// Attempt to acquire exclusive lock for repair
-		if err := db.lock.Lock(LockExclusive); err == nil {
-			defer db.lock.Unlock()
-			db.Repair(&CompactOptions{BlockReaders: true})
-		}
-	}
-
-	return db, nil
-}
-
-// Close flushes state, clears the dirty flag if set, and releases all
-// file handles. Any blocked operations wake up and receive ErrClosed.
-func (db *DB) Close() error {
-	db.cond.L.Lock()
-	db.state.Store(StateClosed)
-	db.cond.Broadcast()
-	db.cond.L.Unlock()
-
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
-	// Drain in-flight flock calls before closing the fd (see lock.go)
-	if db.lock != nil {
-		db.lock.setFile(nil)
-	}
-
-	var errs []error
-
-	if db.header.Error == 1 {
-		db.header.Error = 0
-		db.header.State[stCount] = db.count.Load()
-		hdrBytes, err := db.header.encode()
-		if err != nil {
-			errs = append(errs, err)
-		} else if _, err := db.writer.WriteAt(hdrBytes, 0); err != nil {
-			errs = append(errs, err)
-		}
-		if err := db.writer.Sync(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if err := munmapFile(db.mapped); err != nil {
-		errs = append(errs, err)
-	}
-	db.mapped = nil
-	if err := db.reader.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	if err := db.writer.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	if err := db.root.Close(); err != nil {
-		errs = append(errs, err)
-	}
-
-	return errors.Join(errs...)
 }
 
 // Section boundary helpers. These translate header offsets into the ranges
@@ -344,56 +127,5 @@ func (db *DB) remap() error {
 		return fmt.Errorf("remap: mmap: %w", err)
 	}
 	db.mapped = data
-	return nil
-}
-
-// blockWrite and blockRead acquire all three concurrency layers (state
-// check → OS flock → RWMutex) before allowing an operation to proceed.
-// On return the caller holds db.mu (Lock or RLock) and db.lock; both
-// must be released in the defer of the calling method.
-
-func (db *DB) blockWrite() error {
-	if db.state.Load() == StateClosed {
-		return ErrClosed
-	}
-
-	if err := db.lock.Lock(LockExclusive); err != nil {
-		return err
-	}
-
-	db.cond.L.Lock()
-	for db.state.Load() != StateAll {
-		if db.state.Load() == StateClosed {
-			db.cond.L.Unlock()
-			db.lock.Unlock()
-			return ErrClosed
-		}
-		db.cond.Wait()
-	}
-	db.mu.Lock()
-	db.cond.L.Unlock()
-	return nil
-}
-
-func (db *DB) blockRead() error {
-	if db.state.Load() == StateClosed {
-		return ErrClosed
-	}
-
-	if err := db.lock.Lock(LockShared); err != nil {
-		return err
-	}
-
-	db.cond.L.Lock()
-	for db.state.Load() == StateNone || db.state.Load() == StateClosed {
-		if db.state.Load() == StateClosed {
-			db.cond.L.Unlock()
-			db.lock.Unlock()
-			return ErrClosed
-		}
-		db.cond.Wait()
-	}
-	db.mu.RLock()
-	db.cond.L.Unlock()
 	return nil
 }

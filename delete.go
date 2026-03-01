@@ -24,7 +24,7 @@ func (db *DB) Delete(label string) error {
 	// Check threshold under lock, compact after release (see set.go).
 	compact := err == nil && db.shouldCompact()
 	db.mu.Unlock()
-	db.lock.Unlock()
+	db.lock.Release()
 
 	if compact {
 		db.Compact()

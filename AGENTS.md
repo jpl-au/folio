@@ -80,6 +80,28 @@ grep -c '"_r":1' docs.folio
 
 See [USAGE.md](USAGE.md) for the full catalogue.
 
+## Code layout
+
+The main package provides the public API. Two internal packages encapsulate
+self-contained utilities:
+
+| Package | Purpose |
+|---------|---------|
+| `internal/bloom` | Probabilistic bloom filter for sparse region lookups |
+| `internal/flock` | OS-level file locking (flock/LockFileEx) |
+
+Key source files in the main package:
+
+| File | Concern |
+|------|---------|
+| `db.go` | Config, DB struct, section helpers |
+| `open.go` | Database creation and opening |
+| `close.go` | Database teardown |
+| `gate.go` | Concurrency gating (blockRead/blockWrite) |
+| `record.go` | Record types, byte-position constants, decode |
+| `scan.go` | Binary search, sparse scan, metadata scan |
+| `repair.go` | Compaction and crash recovery |
+
 ## Writing
 
 Writes require either the Go library or a correct implementation of the

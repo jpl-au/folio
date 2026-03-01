@@ -70,7 +70,7 @@ func (db *DB) Search(pattern string, opts SearchOptions) iter.Seq2[Match, error]
 		}
 		defer func() {
 			db.mu.RUnlock()
-			db.lock.Unlock()
+			db.lock.Release()
 		}()
 
 		var match func([]byte) bool
@@ -170,7 +170,7 @@ func (db *DB) MatchLabel(pattern string) iter.Seq2[Match, error] {
 		}
 		defer func() {
 			db.mu.RUnlock()
-			db.lock.Unlock()
+			db.lock.Release()
 		}()
 
 		fullPattern := `(?i){"_r":1.*"_l":"[^"]*` + pattern + `[^"]*"`

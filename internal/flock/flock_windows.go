@@ -1,8 +1,8 @@
 //go:build windows
 
 // LockFileEx/UnlockFileEx implementation for Windows.
-// Both methods are called with l.mu held by the exported Lock/Unlock.
-package folio
+// Both methods are called with l.mu held by the exported Acquire/Release.
+package flock
 
 import (
 	"syscall"
@@ -16,14 +16,13 @@ var (
 )
 
 const (
-	LOCKFILE_EXCLUSIVE_LOCK   = 0x00000002
-	LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
+	lockfileExclusiveLock = 0x00000002
 )
 
-func (l *fileLock) lock(mode LockMode) error {
+func (l *Lock) lock(mode Mode) error {
 	var flags uint32 = 0
-	if mode == LockExclusive {
-		flags |= LOCKFILE_EXCLUSIVE_LOCK
+	if mode == Exclusive {
+		flags |= lockfileExclusiveLock
 	}
 
 	// Blocking lock over the entire file region (0 to max).
@@ -44,7 +43,7 @@ func (l *fileLock) lock(mode LockMode) error {
 	return nil
 }
 
-func (l *fileLock) unlock() error {
+func (l *Lock) unlock() error {
 	h := syscall.Handle(l.f.Fd())
 	var overlapped syscall.Overlapped
 

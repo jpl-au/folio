@@ -20,7 +20,7 @@ func (db *DB) List() iter.Seq2[string, error] {
 		}
 		defer func() {
 			db.mu.RUnlock()
-			db.lock.Unlock()
+			db.lock.Release()
 		}()
 
 		s := db.src()

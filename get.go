@@ -18,7 +18,7 @@ func (db *DB) Get(label string) (string, error) {
 	}
 	defer func() {
 		db.mu.RUnlock()
-		db.lock.Unlock()
+		db.lock.Release()
 	}()
 
 	id := hash(label, db.header.Algorithm)
@@ -105,7 +105,7 @@ func (db *DB) Exists(label string) (bool, error) {
 	}
 	defer func() {
 		db.mu.RUnlock()
-		db.lock.Unlock()
+		db.lock.Release()
 	}()
 
 	id := hash(label, db.header.Algorithm)

@@ -37,7 +37,7 @@ func (db *DB) All() iter.Seq2[Document, error] {
 		}
 		defer func() {
 			db.mu.RUnlock()
-			db.lock.Unlock()
+			db.lock.Release()
 		}()
 
 		s := db.src()

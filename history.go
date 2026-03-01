@@ -39,7 +39,7 @@ func (db *DB) History(label string) iter.Seq2[Version, error] {
 		}
 		defer func() {
 			db.mu.RUnlock()
-			db.lock.Unlock()
+			db.lock.Release()
 		}()
 
 		id := hash(label, db.header.Algorithm)

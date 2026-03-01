@@ -1,87 +1,13 @@
-// Bloom filter tests.
+// Bloom filter integration tests.
 //
-// The optional bloom filter is a probabilistic data structure that
-// tracks which document IDs exist in the sparse region. When enabled,
-// Get and Exists check the bloom filter before performing a linear scan
-// of the sparse section. A "definitely not present" result skips the
-// scan entirely — a significant speedup when the sparse region is large
-// and most lookups are for documents in the sorted section.
-//
-// The filter trades a small false-positive rate (<2%) for the ability
-// to skip most sparse scans. These tests verify correctness (no false
-// negatives), the false-positive rate is within bounds, and that the
-// filter is properly reset after compaction (which empties the sparse
-// region).
+// These verify that the bloom filter is correctly wired into the
+// database operations: Get, Exists, Compact, and the disabled path.
 package folio
 
 import (
 	"path/filepath"
-	"strconv"
 	"testing"
 )
-
-// TestBloomAddContains verifies the basic contract: after Add("x"),
-// Contains("x") must return true. A false negative would cause Get to
-// skip the sparse scan and return ErrNotFound for a document that
-// exists — silent data loss.
-func TestBloomAddContains(t *testing.T) {
-	b := newBloom()
-	b.Add("abc123")
-	if !b.Contains("abc123") {
-		t.Error("Contains should return true for added ID")
-	}
-}
-
-// TestBloomMiss verifies that Contains returns false for an ID that was
-// never added. This is the fast path that skips the sparse scan. A
-// false positive here is acceptable (the bloom filter allows them) but
-// a systematic false positive for all IDs would defeat the purpose.
-func TestBloomMiss(t *testing.T) {
-	b := newBloom()
-	b.Add("abc123")
-	if b.Contains("xyz789") {
-		t.Error("Contains should return false for absent ID")
-	}
-}
-
-// TestBloomReset verifies that Reset clears all bits. Compaction calls
-// Reset because it empties the sparse region — if old bits survived,
-// Get would unnecessarily scan the (now-empty) sparse section for every
-// document that was previously added, wasting the performance benefit
-// of the filter.
-func TestBloomReset(t *testing.T) {
-	b := newBloom()
-	b.Add("abc123")
-	b.Reset()
-	if b.Contains("abc123") {
-		t.Error("Contains should return false after Reset")
-	}
-}
-
-// TestBloomFPRate measures the false-positive rate with 1000 entries
-// and 10000 probes. The filter is sized for <1% FP rate at expected
-// load; this test uses a 2% threshold to allow for statistical noise.
-// If the rate exceeded this, the filter would trigger sparse scans too
-// often and provide negligible speedup.
-func TestBloomFPRate(t *testing.T) {
-	b := newBloom()
-	for i := range 1000 {
-		b.Add("present-" + strconv.Itoa(i))
-	}
-
-	fp := 0
-	tests := 10000
-	for i := range tests {
-		if b.Contains("absent-" + strconv.Itoa(i)) {
-			fp++
-		}
-	}
-
-	rate := float64(fp) / float64(tests)
-	if rate > 0.02 {
-		t.Errorf("false positive rate %.4f exceeds 2%%", rate)
-	}
-}
 
 // TestGetBloomSkipsSparse exercises the bloom filter integration in Get.
 // With the filter enabled, Get("nonexistent") should return ErrNotFound

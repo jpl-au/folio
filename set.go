@@ -40,7 +40,7 @@ func (db *DB) Set(label, content string) error {
 	// here would deadlock.
 	compact := err == nil && db.shouldCompact()
 	db.mu.Unlock()
-	db.lock.Unlock()
+	db.lock.Release()
 
 	if compact {
 		db.Compact()
@@ -75,7 +75,7 @@ func (db *DB) Batch(docs ...Document) error {
 	// Same pattern as Set: check threshold under lock, compact after release.
 	compact := err == nil && db.shouldCompact()
 	db.mu.Unlock()
-	db.lock.Unlock()
+	db.lock.Release()
 
 	if compact {
 		db.Compact()

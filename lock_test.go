@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/jpl-au/folio/internal/flock"
 )
 
 // TestLocking verifies that an exclusive lock blocks a second exclusive
@@ -50,7 +52,7 @@ func TestLocking(t *testing.T) {
 	// but since blockWrite is internal, we can just call Set.
 
 	// Better test: Acquire lock manually on db1.lock
-	err = db1.lock.Lock(LockExclusive)
+	err = db1.lock.Acquire(flock.Exclusive)
 	if err != nil {
 		t.Fatalf("db1 manual lock failed: %v", err)
 	}
@@ -62,11 +64,11 @@ func TestLocking(t *testing.T) {
 	done := make(chan bool)
 	go func() {
 		// Try to acquire lock
-		err := db2.lock.Lock(LockExclusive)
+		err := db2.lock.Acquire(flock.Exclusive)
 		if err != nil {
 			t.Errorf("db2 lock failed: %v", err)
 		}
-		db2.lock.Unlock()
+		db2.lock.Release()
 		done <- true
 	}()
 
@@ -78,7 +80,7 @@ func TestLocking(t *testing.T) {
 	}
 
 	// 3. DB1 release
-	db1.lock.Unlock()
+	db1.lock.Release()
 
 	// 4. DB2 should now succeed
 	select {
@@ -105,15 +107,15 @@ func TestReadWriteLocking(t *testing.T) {
 	defer db2.Close()
 
 	// DB1 holds Shared Lock (Read)
-	if err := db1.lock.Lock(LockShared); err != nil {
+	if err := db1.lock.Acquire(flock.Shared); err != nil {
 		t.Fatal(err)
 	}
 
 	// DB2 wants Exclusive Lock (Write) -> Should Block
 	done := make(chan bool)
 	go func() {
-		db2.lock.Lock(LockExclusive)
-		db2.lock.Unlock()
+		db2.lock.Acquire(flock.Exclusive)
+		db2.lock.Release()
 		done <- true
 	}()
 
@@ -124,7 +126,7 @@ func TestReadWriteLocking(t *testing.T) {
 		// Expected
 	}
 
-	db1.lock.Unlock()
+	db1.lock.Release()
 
 	select {
 	case <-done:

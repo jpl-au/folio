@@ -27,6 +27,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/jpl-au/folio/internal/bloom"
 )
 
 func BenchmarkSet(b *testing.B) {
@@ -354,7 +356,7 @@ func BenchmarkExistsMissNoBloom(b *testing.B) {
 }
 
 func BenchmarkBloomAdd(b *testing.B) {
-	bl := newBloom()
+	bl := bloom.New()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		bl.Add("id-" + strconv.Itoa(i))
@@ -362,7 +364,7 @@ func BenchmarkBloomAdd(b *testing.B) {
 }
 
 func BenchmarkBloomContains(b *testing.B) {
-	bl := newBloom()
+	bl := bloom.New()
 	for i := range 1000 {
 		bl.Add("id-" + strconv.Itoa(i))
 	}

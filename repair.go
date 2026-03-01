@@ -105,7 +105,7 @@ func (db *DB) Repair(opts *CompactOptions) error {
 	db.mapped = nil
 
 	// Drain in-flight flock calls before closing the fd (see lock.go)
-	db.lock.setFile(nil)
+	db.lock.SetFile(nil)
 
 	db.reader.Close()
 	db.writer.Close()
@@ -132,7 +132,7 @@ func (db *DB) Repair(opts *CompactOptions) error {
 
 	db.reader = reader
 	db.writer = writer
-	db.lock.setFile(db.writer)
+	db.lock.SetFile(db.writer)
 	db.header = hdrParsed
 	db.count.Store(hdrParsed.State[stCount])
 
