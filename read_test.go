@@ -3,8 +3,8 @@
 // The read layer has three core operations: line (read one JSONL record
 // at a byte offset), align (find the next newline from a mid-line
 // position), and position (return the current seek offset). Every read
-// operation in the database — Get, List, History, Search, scan, sparse
-// — ultimately calls line() to extract a single record. align() is used
+// operation in the database - Get, List, History, Search, scan, sparse
+// - ultimately calls line() to extract a single record. align() is used
 // by binary search to recover line boundaries after seeking to the
 // middle of a record.
 //
@@ -183,7 +183,7 @@ func TestAlignNoNewline(t *testing.T) {
 }
 
 // TestAlignAtEOF verifies that align() returns -1 when called at the
-// end of the file. This is the base case for binary search termination —
+// end of the file. This is the base case for binary search termination  - 
 // without it, the search could loop forever trying to find a newline
 // beyond the last byte.
 func TestAlignAtEOF(t *testing.T) {

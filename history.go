@@ -84,7 +84,7 @@ func (db *DB) History(label string) iter.Seq2[Version, error] {
 		}
 
 		// Sort by file offset, not timestamp. Timestamps can collide (same
-		// millisecond) but file offsets are strictly ordered — the append
+		// millisecond) but file offsets are strictly ordered - the append
 		// position is the ground truth for write order. Do not "fix" this
 		// to sort by timestamp; it would silently reorder concurrent writes.
 		slices.SortFunc(versions, func(a, b versionWithOffset) int {

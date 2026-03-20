@@ -1,4 +1,4 @@
-// Soft deletion — the record is converted to history so its compressed
+// Soft deletion - the record is converted to history so its compressed
 // snapshot survives for version retrieval, but it no longer appears in
 // lookups or listings because its index is erased.
 package folio

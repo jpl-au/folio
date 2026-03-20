@@ -3,7 +3,7 @@
 // Rehash rebuilds the entire database with a different hash algorithm.
 // Every record's ID is recomputed from its label using the new
 // algorithm, then the file is rebuilt with the new IDs. This is a
-// destructive operation — if Rehash failed to recompute even one ID,
+// destructive operation - if Rehash failed to recompute even one ID,
 // that document would become unreachable because Get computes the ID
 // from the label using the header's current algorithm.
 //
@@ -40,7 +40,7 @@ func TestRehashChangesAlgorithm(t *testing.T) {
 
 // TestRehashDataStillAccessible verifies that every document is
 // reachable after migration. Rehash recomputes each document's ID from
-// its label — if the label were read incorrectly (e.g. not unescaped),
+// its label - if the label were read incorrectly (e.g. not unescaped),
 // the new ID would be wrong and the document would be lost.
 func TestRehashDataStillAccessible(t *testing.T) {
 	db := openTestDB(t)

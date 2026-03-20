@@ -8,7 +8,7 @@
 // unescaping, and a regex path that optionally unescapes content first
 // (Decode: true).
 //
-// The fast path is important for performance — it avoids allocating
+// The fast path is important for performance - it avoids allocating
 // a new string for every record. But it means special characters in
 // content (quotes, backslashes, newlines) are stored as JSON escape
 // sequences (\" \\ \n) in the raw bytes. These tests verify that both
@@ -91,7 +91,7 @@ func TestSearchCaseSensitive(t *testing.T) {
 
 // TestSearchEarlyBreak verifies that breaking out of the range loop
 // stops the scan without consuming all results. The caller controls
-// result count by breaking — no Limit option needed.
+// result count by breaking - no Limit option needed.
 func TestSearchEarlyBreak(t *testing.T) {
 	db := openTestDB(t)
 
@@ -251,7 +251,7 @@ func TestMatchLabelMultiple(t *testing.T) {
 // containing double quotes. In raw JSON, a quote in content is stored
 // as \". The literal fast path JSON-escapes the query to match the raw
 // bytes; the Decode path unescapes the content first. Both must find
-// the match — if either path mishandled quote escaping, documents with
+// the match - if either path mishandled quote escaping, documents with
 // quoted content would be unsearchable.
 func TestSearchDecodeQuotes(t *testing.T) {
 	db := openTestDB(t)
@@ -366,7 +366,7 @@ func TestSearchBothPathsQuotes(t *testing.T) {
 
 // TestSearchDecodePlain verifies that Decode:true works with plain
 // content that has no escape sequences. The decode path must not break
-// content that doesn't need unescaping — if it corrupted plain strings,
+// content that doesn't need unescaping - if it corrupted plain strings,
 // the most common search case would fail.
 func TestSearchDecodePlain(t *testing.T) {
 	db := openTestDB(t)

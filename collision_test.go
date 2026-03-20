@@ -2,7 +2,7 @@
 //
 // Each document is identified by a 16-hex-char ID derived from its
 // label via hash(). Because the ID space is 2^64, collisions are
-// astronomically unlikely for real workloads — but the lookup path must
+// astronomically unlikely for real workloads - but the lookup path must
 // still correctly distinguish documents by comparing the full label
 // string (stored in _l), not just the hash-derived ID. These tests
 // verify that CRUD operations on one document never affect a different
@@ -16,7 +16,7 @@ import (
 )
 
 // findCollision finds two labels that hash to the same ID.
-// This is for testing purposes — in practice collisions are rare.
+// This is for testing purposes - in practice collisions are rare.
 func findCollision(alg int) (string, string) {
 	seen := make(map[string]string)
 	for i := range 100000 {
@@ -124,7 +124,7 @@ func TestHashCollisionExists(t *testing.T) {
 
 // TestHashCollisionHistory verifies that History returns versions only
 // for the requested document. History uses group() which walks forward
-// through the heap collecting records with the same ID — but it must
+// through the heap collecting records with the same ID - but it must
 // also check the label to avoid mixing versions from different documents
 // that might share an ID.
 func TestHashCollisionHistory(t *testing.T) {
@@ -196,7 +196,7 @@ func TestHashCollisionSortedThenSparse(t *testing.T) {
 
 // TestManyDocumentsDifferentLabels writes 100 documents and verifies
 // every one is retrievable. With 100 unique IDs in the sparse region,
-// this stresses the linear scan path — if sparse() had an off-by-one
+// this stresses the linear scan path - if sparse() had an off-by-one
 // in its loop or stopped early, some documents would be missing.
 func TestManyDocumentsDifferentLabels(t *testing.T) {
 	db := openTestDB(t)
@@ -223,7 +223,7 @@ func TestManyDocumentsDifferentLabels(t *testing.T) {
 
 // TestManyDocumentsAfterCompact writes 50 documents, compacts, and
 // verifies every one survives. This stresses the sorted-section binary
-// search with a realistic number of entries — if the sort order were
+// search with a realistic number of entries - if the sort order were
 // wrong or the index offsets drifted during rebuild, some documents
 // would be unreachable.
 func TestManyDocumentsAfterCompact(t *testing.T) {

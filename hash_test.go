@@ -6,12 +6,12 @@
 // 16–31) so that binary search can compare IDs without parsing JSON.
 //
 // Three properties are essential:
-//  1. Determinism — the same label must always produce the same ID,
+//  1. Determinism - the same label must always produce the same ID,
 //     otherwise a document written with one ID could never be found.
-//  2. Output format — exactly 16 lowercase hex characters, because
+//  2. Output format - exactly 16 lowercase hex characters, because
 //     the fixed-position field extraction in scanm and binary search
 //     assumes a 16-byte ID at a known offset.
-//  3. Algorithm independence — different algorithms must produce
+//  3. Algorithm independence - different algorithms must produce
 //     different IDs for the same label, so Rehash can detect stale
 //     indexes and rebuild them.
 package folio
@@ -69,7 +69,7 @@ func TestHashDeterministic(t *testing.T) {
 
 // TestHashDifferentLabels verifies that "foo" and "bar" produce
 // different IDs. If they collided, Set("foo") then Set("bar") would
-// overwrite the same document — silent data loss.
+// overwrite the same document - silent data loss.
 func TestHashDifferentLabels(t *testing.T) {
 	for _, alg := range []int{AlgXXHash3, AlgFNV1a, AlgBlake2b} {
 		h1 := hash("foo", alg)
@@ -109,7 +109,7 @@ func TestHashEmptyLabel(t *testing.T) {
 }
 
 // TestHashInvalidAlgorithm verifies that an unrecognised algorithm ID
-// returns an empty string. This prevents silent misuse — if hash()
+// returns an empty string. This prevents silent misuse - if hash()
 // returned a deterministic value for unknown algorithms, documents
 // would be written with a made-up ID that no valid algorithm could
 // reproduce, making them permanently unreachable.
@@ -121,7 +121,7 @@ func TestHashInvalidAlgorithm(t *testing.T) {
 }
 
 // TestHashAlgorithmConstants guards the numeric values stored in the
-// header's Algorithm field. These values are persisted on disk — if a
+// header's Algorithm field. These values are persisted on disk - if a
 // constant changed (e.g. AlgFNV1a became 3), existing databases would
 // use the wrong hash function on reopen, producing different IDs for
 // every label and making all documents unfindable.

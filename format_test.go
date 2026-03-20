@@ -7,7 +7,7 @@
 // operates. These tests read raw bytes from the file and verify the
 // format matches expectations. They serve as a contract between the
 // write path (which produces the layout) and the read path (which
-// assumes it) — if either side changes, these tests catch the mismatch
+// assumes it) - if either side changes, these tests catch the mismatch
 // before it becomes a runtime bug.
 package folio
 
@@ -93,7 +93,7 @@ func TestHeaderFormat(t *testing.T) {
 
 // TestRecordFormat verifies that the first record after the header
 // starts with {"_r": and has a valid type byte at TypePos. This is the
-// most basic format contract — if the JSON library changed field
+// most basic format contract - if the JSON library changed field
 // ordering, every fixed-position extraction in scan, scanm, and binary
 // search would read the wrong bytes.
 func TestRecordFormat(t *testing.T) {
@@ -138,7 +138,7 @@ func TestRecordFormat(t *testing.T) {
 
 // TestIndexRecordFormat verifies the structure of a type-1 (Index)
 // record: 16-char hex ID, correct label, and an Offset >= HeaderSize.
-// The Offset is the critical field — it tells Get where to seek for
+// The Offset is the critical field - it tells Get where to seek for
 // the data record. An Offset < HeaderSize would read inside the header.
 func TestIndexRecordFormat(t *testing.T) {
 	db := openTestDB(t)
@@ -174,7 +174,7 @@ func TestIndexRecordFormat(t *testing.T) {
 // TestDataRecordFormat verifies the structure of a type-2 (Record)
 // record: correct type, 16-char ID, matching label, content in _d,
 // and a non-empty _h field. The _h field is populated even for a single
-// version (it stores a compressed empty history) — if it were missing,
+// version (it stores a compressed empty history) - if it were missing,
 // History would fail to decompress it.
 func TestDataRecordFormat(t *testing.T) {
 	db := openTestDB(t)

@@ -23,7 +23,7 @@ import (
 )
 
 // TestRawAppendToEOF verifies that raw writes at the current tail
-// offset. If raw wrote at a different position — say byte 0 — it would
+// offset. If raw wrote at a different position - say byte 0 - it would
 // overwrite the header, destroying the file.
 func TestRawAppendToEOF(t *testing.T) {
 	db := openTestDB(t)
@@ -103,7 +103,7 @@ func TestRawSetsDirtyFlag(t *testing.T) {
 
 // TestAppend verifies the high-level append operation that writes a
 // record+index pair. The critical check is that the index's Offset
-// field points to the record's byte position — this is how Get finds
+// field points to the record's byte position - this is how Get finds
 // the data. If append wrote the index before the record or calculated
 // the offset incorrectly, Get would seek to the wrong position and
 // either read a different record or hit an out-of-bounds error.
@@ -158,7 +158,7 @@ func TestAppend(t *testing.T) {
 // TestWriteAtOverwrites verifies that writeAt modifies bytes in place
 // at the specified offset. This is used by Delete (to blank an index
 // with spaces) and by dirty() (to flip the error flag byte). If writeAt
-// appended instead of overwriting, blanking would fail — the old index
+// appended instead of overwriting, blanking would fail - the old index
 // would remain visible and the blanked data would be appended as a
 // corrupt record at the end of the file.
 func TestWriteAtOverwrites(t *testing.T) {
@@ -198,7 +198,7 @@ func TestWriteAtDoesNotAffectTail(t *testing.T) {
 
 // TestWriteAtWithSyncWrites verifies that writeAt calls fsync when
 // SyncWrites is enabled. Without fsync, the OS may buffer the overwrite
-// and a power loss would leave the old bytes on disk — meaning a deleted
+// and a power loss would leave the old bytes on disk - meaning a deleted
 // document's index would reappear, or the dirty flag would revert to
 // clean, preventing crash recovery.
 func TestWriteAtWithSyncWrites(t *testing.T) {
@@ -261,7 +261,7 @@ func TestDeleteWithSyncWrites(t *testing.T) {
 }
 
 // TestRawWithSyncWrites verifies that raw calls fsync when SyncWrites
-// is enabled. raw is the lowest-level write primitive — if it didn't
+// is enabled. raw is the lowest-level write primitive - if it didn't
 // sync, neither Set nor Delete would be durable regardless of their
 // own fsync calls, because the actual bytes are written by raw.
 func TestRawWithSyncWrites(t *testing.T) {

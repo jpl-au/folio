@@ -2,7 +2,7 @@
 //
 // All scans data records (_r=2) across the heap and sparse regions,
 // extracting label and content by byte scanning. Unlike the List+Get
-// pattern, it never follows index pointers — content is read directly
+// pattern, it never follows index pointers - content is read directly
 // from the data record, avoiding per-document seek overhead.
 //
 // The scan uses the same sorted-region awareness as Search: only the

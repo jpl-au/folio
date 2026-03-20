@@ -9,7 +9,7 @@
 // the latest version immediately accessible via the newest index.
 //
 // Batch amortises lock acquisition across multiple documents. All
-// inputs are validated before any writes begin — if validation fails,
+// inputs are validated before any writes begin - if validation fails,
 // no documents are written.
 package folio
 
@@ -36,7 +36,7 @@ func (db *DB) Set(label, content string) error {
 
 	// Check the compaction threshold while locks are held so the read
 	// of State is consistent. Compact() is called after releasing both
-	// locks because it acquires its own locks internally — calling it
+	// locks because it acquires its own locks internally - calling it
 	// here would deadlock.
 	compact := err == nil && db.shouldCompact()
 	db.mu.Unlock()

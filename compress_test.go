@@ -116,7 +116,7 @@ func TestCompressReducesSize(t *testing.T) {
 
 // TestCompressOutputPrintable verifies that every byte in the compressed
 // output falls within the ascii85 printable range (33–117). The _h field
-// is stored as a JSON string value — if the output contained control
+// is stored as a JSON string value - if the output contained control
 // characters or double quotes, it would break the JSON structure of the
 // entire record line, making it unparseable by decode().
 func TestCompressOutputPrintable(t *testing.T) {
@@ -133,7 +133,7 @@ func TestCompressOutputPrintable(t *testing.T) {
 
 // TestCompressBinaryData verifies that all 256 possible byte values
 // survive the round-trip. zstd handles arbitrary binary data, but
-// ascii85 encodes in 5-byte groups and pads the last group — if the
+// ascii85 encodes in 5-byte groups and pads the last group - if the
 // padding logic were wrong, the last 1–3 bytes of the decompressed
 // output would be corrupt, which for zstd means an invalid frame
 // trailer and a decompression error.

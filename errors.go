@@ -1,6 +1,6 @@
 // Package folio provides an append-only document database backed by a single
 // JSONL file. Documents are stored as newline-delimited JSON records with
-// automatic versioning — every update preserves the previous content as a
+// automatic versioning - every update preserves the previous content as a
 // compressed history snapshot.
 //
 // The file is divided into a heap, index, and sparse region. The heap

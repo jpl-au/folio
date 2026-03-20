@@ -70,7 +70,7 @@ func header(f *os.File) (*Header, error) {
 }
 
 // dirty patches the _e field in place without rewriting the full header.
-// The value sits at byte 13: {"_v":1,"_e":X — this position is stable
+// The value sits at byte 13: {"_v":1,"_e":X - this position is stable
 // because _v and _e are always serialised first and _v is single-digit.
 func dirty(w *os.File, v bool) error {
 	b := byte('0')

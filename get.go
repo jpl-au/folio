@@ -24,7 +24,7 @@ func (db *DB) Get(label string) (string, error) {
 	id := hash(label, db.header.Algorithm)
 	s := db.src()
 
-	// In-memory index — O(1) lookup
+	// In-memory index - O(1) lookup
 	if db.index != nil {
 		if off, ok := db.index[id]; ok {
 			data, err := line(s, off)
@@ -50,7 +50,7 @@ func (db *DB) Get(label string) (string, error) {
 		return "", ErrNotFound
 	}
 
-	// Sorted index section — fast path after compaction
+	// Sorted index section - fast path after compaction
 	result := scan(s, id, db.indexStart(), db.indexEnd(), TypeIndex)
 	if result != nil {
 		idx, err := decodeIndex(result.Data)
@@ -74,7 +74,7 @@ func (db *DB) Get(label string) (string, error) {
 		return "", ErrNotFound
 	}
 
-	// Sparse region — reverse scan so the newest matching index wins
+	// Sparse region - reverse scan so the newest matching index wins
 	results := sparse(s, id, db.sparseStart(), s.sz, TypeIndex)
 	for i := len(results) - 1; i >= 0; i-- {
 		idx, err := decodeIndex(results[i].Data)
@@ -111,7 +111,7 @@ func (db *DB) Exists(label string) (bool, error) {
 	id := hash(label, db.header.Algorithm)
 	s := db.src()
 
-	// In-memory index — single read to verify label on collision.
+	// In-memory index - single read to verify label on collision.
 	if db.index != nil {
 		off, ok := db.index[id]
 		if !ok {

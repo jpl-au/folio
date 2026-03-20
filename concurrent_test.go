@@ -24,7 +24,7 @@ import (
 
 // TestConcurrentReads verifies that multiple goroutines can call Get
 // simultaneously without data races or returning incorrect content.
-// blockRead acquires a read-compatible state via sync.Cond — if the
+// blockRead acquires a read-compatible state via sync.Cond - if the
 // condition check were wrong (e.g. using Lock instead of Wait), all
 // readers would serialise and throughput would collapse, or worse,
 // a reader could proceed during a write and see a partial line.
@@ -82,8 +82,8 @@ func TestConcurrentWrites(t *testing.T) {
 
 // TestConcurrentReadWrite exercises the most common production pattern:
 // readers and writers operating simultaneously. The state machine must
-// allow both when in StateAll. A subtle bug here — such as a writer
-// transitioning to StateRead before completing — would cause readers to
+// allow both when in StateAll. A subtle bug here - such as a writer
+// transitioning to StateRead before completing - would cause readers to
 // see a half-written line or writers to block indefinitely.
 func TestConcurrentReadWrite(t *testing.T) {
 	db := openTestDB(t)
@@ -123,7 +123,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 // blocked in blockRead. The state machine uses sync.Cond.Wait, which
 // suspends the goroutine until Broadcast is called. If Close only called
 // Signal (waking one waiter) instead of Broadcast, the remaining
-// goroutines would hang forever — a goroutine leak that would prevent
+// goroutines would hang forever - a goroutine leak that would prevent
 // the process from exiting cleanly.
 func TestCloseWakesWaiters(t *testing.T) {
 	db := openTestDB(t)
@@ -192,7 +192,7 @@ func TestConcurrentList(t *testing.T) {
 // TestCloseWakesWriteWaiters is the write-side counterpart to
 // TestCloseWakesWaiters. Writers blocked in blockWrite must also be
 // woken by Close. If they weren't, a program that calls Close while
-// a background writer is pending would deadlock — the writer waits
+// a background writer is pending would deadlock - the writer waits
 // for StateAll, but Close has already moved the state to StateClosed.
 func TestCloseWakesWriteWaiters(t *testing.T) {
 	db := openTestDB(t)
@@ -224,8 +224,8 @@ func TestCloseWakesWriteWaiters(t *testing.T) {
 // TestConcurrentCompactRead verifies that readers continue to succeed
 // while compaction is in progress. Compact transitions the state to
 // StateRead (blocking writers but allowing readers), rebuilds the file,
-// then restores StateAll. If the state transition were wrong — e.g.
-// moving to StateNone instead of StateRead — all concurrent Get calls
+// then restores StateAll. If the state transition were wrong - e.g.
+// moving to StateNone instead of StateRead - all concurrent Get calls
 // would block until compaction finishes, creating a latency spike
 // proportional to the database size.
 func TestConcurrentCompactRead(t *testing.T) {

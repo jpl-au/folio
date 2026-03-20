@@ -197,7 +197,7 @@ func group(s source, id string, start, end int64) []Result {
 }
 
 // sparse linearly scans an unsorted region. Every record is JSON-parsed
-// because IDs are not in sorted order — there is no way to short-circuit.
+// because IDs are not in sorted order - there is no way to short-circuit.
 // Pass an empty id to collect all records of the given type (used by List).
 func sparse(s source, id string, start, end int64, recordType int) []Result {
 	var results []Result

@@ -114,7 +114,7 @@ func Open(path string, config Config) (*DB, error) {
 	}
 	db.count.Store(hdr.State[stCount])
 
-	// A non-zero AutoCompact is a deliberate change — persist it to the
+	// A non-zero AutoCompact is a deliberate change - persist it to the
 	// header so it survives future opens without needing to be repeated.
 	if config.AutoCompact > 0 && uint64(config.AutoCompact) != hdr.State[stThreshold] {
 		db.header.State[stThreshold] = uint64(config.AutoCompact)
@@ -154,7 +154,7 @@ func Open(path string, config Config) (*DB, error) {
 	if config.MMap {
 		data, err := mmapFile(reader, info.Size())
 		if err != nil {
-			// Unsupported platform or empty file — fall back to file I/O.
+			// Unsupported platform or empty file - fall back to file I/O.
 			db.config.MMap = false
 		} else {
 			db.mapped = data

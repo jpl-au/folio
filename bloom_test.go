@@ -12,7 +12,7 @@ import (
 // TestGetBloomSkipsSparse exercises the bloom filter integration in Get.
 // With the filter enabled, Get("nonexistent") should return ErrNotFound
 // without scanning the sparse region. The test also verifies that a
-// present document is still found — the filter must have no false
+// present document is still found - the filter must have no false
 // negatives.
 func TestGetBloomSkipsSparse(t *testing.T) {
 	dir := t.TempDir()

@@ -9,7 +9,7 @@
 // corruption techniques are used, chosen for different reasons:
 //
 // Byte patching (writeAt at offset +34): After compaction, records and
-// indexes are found via binary search over fixed-position fields — the
+// indexes are found via binary search over fixed-position fields - the
 // type byte lives at TypePos and the ID at bytes IDStart–IDEnd. By
 // corrupting at byte 34 (past the ID but inside the JSON body), binary search still
 // locates the line, but JSON parsing fails when decodeIndex or decode
@@ -69,7 +69,7 @@ func TestGetCorruptSortedIndex(t *testing.T) {
 // byte offset of the data record), then seeks to that offset to read the
 // actual content. If the data record at that offset has damaged JSON,
 // decode returns ErrCorruptRecord. This catches the case where the index
-// survived but the data it references did not — e.g. a crash during a
+// survived but the data it references did not - e.g. a crash during a
 // write that completed the index but corrupted the record.
 func TestGetCorruptSortedRecord(t *testing.T) {
 	db := openTestDB(t)
@@ -94,7 +94,7 @@ func TestGetCorruptSortedRecord(t *testing.T) {
 // line() returns io.EOF. This catches truncated files where the index
 // section survived but the data section was lost. The replacement value
 // must be the same byte length as the original to preserve the JSON
-// structure — otherwise the test would hit the decodeIndex error instead.
+// structure - otherwise the test would hit the decodeIndex error instead.
 func TestGetCorruptSortedRecordOffset(t *testing.T) {
 	db := openTestDB(t)
 	db.Set("doc", "content")
@@ -274,7 +274,7 @@ func TestDeleteCorruptSparseIndex(t *testing.T) {
 // decode the old index to find the previous data record for retirement
 // (retype to history, blank _d, erase index). If the old index is
 // corrupt, Set must fail rather than appending a duplicate without
-// retiring the old version — that would leave two live indexes for the
+// retiring the old version - that would leave two live indexes for the
 // same document, causing undefined behaviour on subsequent reads.
 
 // Covers set.go line 50: decodeIndex fails on the sorted index during
@@ -321,7 +321,7 @@ func TestSetCorruptSparseIndex(t *testing.T) {
 // group() finds records by fixed-position ID matching (no JSON parsing),
 // so a record with a valid prefix but corrupt JSON body is returned to
 // History. decode() then fails. Without this check, History would skip
-// the version silently or panic on nil fields — both unacceptable for a
+// the version silently or panic on nil fields - both unacceptable for a
 // version history API where missing entries mean lost data.
 func TestHistoryCorruptRecord(t *testing.T) {
 	db := openTestDB(t)
@@ -340,7 +340,7 @@ func TestHistoryCorruptRecord(t *testing.T) {
 //
 // The record's JSON is valid and decodes fine, but the compressed
 // snapshot in _h has been damaged. We overwrite the _h payload with
-// "AAAAA" — this is valid ascii85 (decodes to 4 bytes) but those bytes
+// "AAAAA" - this is valid ascii85 (decodes to 4 bytes) but those bytes
 // are not a valid zstd frame. This exercises the zstd-specific error
 // branch in decompress(), distinct from the ascii85 error branch tested
 // in malformed_test.go.
@@ -382,7 +382,7 @@ func TestHistoryCorruptLabel(t *testing.T) {
 	if i == -1 {
 		t.Fatal("could not locate _l field in record at HeaderSize")
 	}
-	// Overwrite "doc" with "zzz" — same length, different label.
+	// Overwrite "doc" with "zzz" - same length, different label.
 	db.writeAt(HeaderSize+int64(i)+6, []byte("zzz"))
 
 	versions, err := collect(db.History("doc"))
@@ -451,7 +451,7 @@ func TestGroupSkipsInvalidRecord(t *testing.T) {
 // TestListCorruptIndexStillReturnsLabel verifies that List extracts
 // labels via byte scanning (label()) rather than JSON parsing. A record
 // with a corrupt _o field still has a valid _l, so List returns the
-// label successfully — the corruption only surfaces when Get tries to
+// label successfully - the corruption only surfaces when Get tries to
 // follow the offset.
 func TestListCorruptIndexStillReturnsLabel(t *testing.T) {
 	db := openTestDB(t)
@@ -484,7 +484,7 @@ func TestListCorruptIndexStillReturnsLabel(t *testing.T) {
 // decompress has two error branches: ascii85 decoding (line 59) and zstd
 // decompression (line 63). The ascii85 branch is tested in malformed_test.go
 // with "not valid base85". This test covers the zstd branch by providing
-// "AAAAA" — five characters in the valid ascii85 range (33–117) that decode
+// "AAAAA" - five characters in the valid ascii85 range (33–117) that decode
 // to four bytes which are not a valid zstd frame header. Both branches
 // must return ErrDecompress so callers can distinguish corruption from
 // other failures.

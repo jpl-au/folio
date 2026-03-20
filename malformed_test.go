@@ -1,7 +1,7 @@
 // Unit tests for low-level parsing primitives against malformed input.
 //
-// These verify that the functions which parse raw bytes — decode,
-// decodeIndex, valid, label, header — reject garbage gracefully rather
+// These verify that the functions which parse raw bytes - decode,
+// decodeIndex, valid, label, header - reject garbage gracefully rather
 // than panicking or returning zero-value structs that look valid. The
 // inputs are hand-crafted byte slices, not data from a real database
 // file. For tests that corrupt a live database and exercise full API
@@ -17,7 +17,7 @@ import (
 
 // TestDecodeMalformed ensures that decode returns ErrCorruptRecord for
 // inputs that are not valid JSON objects. This matters because scan
-// functions pass raw bytes to decode without pre-validating JSON — if
+// functions pass raw bytes to decode without pre-validating JSON - if
 // decode returned a zero-value Record instead of an error, callers would
 // silently treat empty strings as document content.
 func TestDecodeMalformed(t *testing.T) {
@@ -43,7 +43,7 @@ func TestDecodeMalformed(t *testing.T) {
 
 // TestDecodeIndexMalformed ensures that decodeIndex returns ErrCorruptIndex
 // for inputs that are not valid JSON objects. Index records carry the byte
-// offset (_o) that Get uses to seek to a data record — if decodeIndex
+// offset (_o) that Get uses to seek to a data record - if decodeIndex
 // returned a zero-value Index, Get would read from byte 0 (the header)
 // and return header JSON as document content.
 func TestDecodeIndexMalformed(t *testing.T) {
@@ -68,7 +68,7 @@ func TestDecodeIndexMalformed(t *testing.T) {
 
 // TestValidMalformed exercises the fast pre-check that scan functions use
 // to skip blanked records and non-JSON lines without attempting a full
-// parse. Only lines starting with '{' are candidates — blanked records
+// parse. Only lines starting with '{' are candidates - blanked records
 // start with spaces, and the header line starts with '{' but is at a
 // known offset so it's never passed to valid(). Getting this wrong would
 // cause scan to attempt JSON parsing on every blanked record, turning
@@ -97,7 +97,7 @@ func TestValidMalformed(t *testing.T) {
 // TestLabelMalformed exercises the byte-scanning label extractor that
 // avoids a full JSON parse in hot paths (compaction, search). It must
 // handle missing _l fields, empty labels, and truncated input by
-// returning "" rather than panicking — callers treat "" as "no label"
+// returning "" rather than panicking - callers treat "" as "no label"
 // and skip the record, which is the correct behaviour for damaged data
 // during compaction where we want to salvage what we can.
 func TestLabelMalformed(t *testing.T) {
@@ -122,7 +122,7 @@ func TestLabelMalformed(t *testing.T) {
 
 // TestHeaderMalformed ensures that header() returns ErrCorruptHeader
 // when the first 128 bytes of a file contain invalid JSON. This is the
-// first thing Open does — if it accepted a corrupt header, every
+// first thing Open does - if it accepted a corrupt header, every
 // subsequent operation would use wrong section boundaries and read
 // garbage from arbitrary file offsets.
 func TestHeaderMalformed(t *testing.T) {
@@ -183,8 +183,8 @@ func TestMalformedRecordSkippedInSparse(t *testing.T) {
 	}
 }
 
-// TestMalformedRecordSkippedInScanm ensures that scanm() — the
-// compaction scanner that reads metadata at fixed byte positions —
+// TestMalformedRecordSkippedInScanm ensures that scanm() - the
+// compaction scanner that reads metadata at fixed byte positions  - 
 // skips lines that are too short to contain the required fields.
 // During compaction, every line in the file is visited. A short line
 // (e.g. from a crash mid-write) must be skipped rather than causing
@@ -205,7 +205,7 @@ func TestMalformedRecordSkippedInScanm(t *testing.T) {
 
 // TestBlankedRecordSkipped verifies the normal update path: when a
 // document is updated, the old index is overwritten with spaces. The
-// blanked line must be invisible to subsequent lookups — valid() returns
+// blanked line must be invisible to subsequent lookups - valid() returns
 // false for lines starting with spaces, so binary search and linear scan
 // both skip it. If blanking failed to make the old index invisible,
 // Get would return stale content.

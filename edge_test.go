@@ -39,7 +39,7 @@ func TestLabelExactly256Bytes(t *testing.T) {
 
 // TestLabelWithPathSeparators verifies that labels containing '/' and
 // '\' are accepted and round-trip correctly. Labels are stored as JSON
-// string values — path separators are valid JSON characters and must
+// string values - path separators are valid JSON characters and must
 // not be rejected or escaped differently. If Set sanitised path
 // separators, users who use hierarchical naming (e.g. "config/db/host")
 // would find their documents stored under a mangled label.
@@ -60,7 +60,7 @@ func TestLabelWithPathSeparators(t *testing.T) {
 
 // TestEmptyLabel verifies that an empty string is rejected with
 // ErrInvalidLabel. An empty label would produce a record with _l:""
-// which the label() extractor returns as "" — the same value it returns
+// which the label() extractor returns as "" - the same value it returns
 // for missing or corrupt labels. This would make the document
 // indistinguishable from a damaged record during compaction.
 func TestEmptyLabel(t *testing.T) {
@@ -212,7 +212,7 @@ func TestCrashRecoveryTmpFile(t *testing.T) {
 // Close can run after an explicit Close in an error path. If the second
 // Close tried to close already-closed file handles, it would either
 // panic or close a file descriptor that has been reused by another
-// goroutine — a subtle and dangerous bug.
+// goroutine - a subtle and dangerous bug.
 func TestDoubleClose(t *testing.T) {
 	db := openTestDB(t)
 
@@ -295,7 +295,7 @@ func TestDeleteFromSparse(t *testing.T) {
 // TestDeleteFromSorted verifies deletion when the document is in the
 // sorted section (after compaction). Delete must find the index via
 // binary search and blank it. This is a different code path from
-// sparse deletion — if the sorted-search path had a bug, documents
+// sparse deletion - if the sorted-search path had a bug, documents
 // would become undeletable after compaction.
 func TestDeleteFromSorted(t *testing.T) {
 	db := openTestDB(t)
@@ -416,7 +416,7 @@ func TestDeleteAfterCompactFromSorted(t *testing.T) {
 // find the old index, blank it, then append the new version to sparse.
 // If Set failed to blank the sorted index, both the old and new versions
 // would have visible indexes, and Get would return whichever it found
-// first — possibly the stale version.
+// first - possibly the stale version.
 func TestSetUpdateSorted(t *testing.T) {
 	db := openTestDB(t)
 

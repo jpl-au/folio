@@ -234,7 +234,7 @@ func TestMMapConcurrentReads(t *testing.T) {
 // writers call remap() under the write lock while readers hold
 // references to the mapped slice under RLock. If remap replaced the
 // mapping while a reader was mid-scan, the reader would access
-// unmapped memory. The RWMutex prevents this — this test verifies
+// unmapped memory. The RWMutex prevents this - this test verifies
 // that guarantee under load.
 func TestMMapConcurrentReadWrite(t *testing.T) {
 	db := openMMapDB(t)
@@ -321,8 +321,8 @@ func TestMMapConcurrentCompactRead(t *testing.T) {
 	}
 }
 
-// TestMMapConcurrentBatchRead exercises Batch — which appends multiple
-// records under a single lock hold and remaps once at the end — with
+// TestMMapConcurrentBatchRead exercises Batch - which appends multiple
+// records under a single lock hold and remaps once at the end - with
 // concurrent readers. The single remap means the mapping is stale for
 // the duration of the batch; readers must fall back to file I/O via
 // the RLock/Lock exclusion, not access a partially-grown mapping.
@@ -367,8 +367,8 @@ func TestMMapConcurrentBatchRead(t *testing.T) {
 	}
 }
 
-// TestMMapConcurrentDeleteRead exercises Delete — which blanks records
-// in place and remaps — with concurrent readers. The blank patches are
+// TestMMapConcurrentDeleteRead exercises Delete - which blanks records
+// in place and remaps - with concurrent readers. The blank patches are
 // visible through MAP_SHARED without remap, but the remap updates the
 // mapping size. Readers must see a consistent view throughout.
 func TestMMapConcurrentDeleteRead(t *testing.T) {

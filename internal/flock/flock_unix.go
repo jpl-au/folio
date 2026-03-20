@@ -11,7 +11,7 @@ func (l *Lock) lock(mode Mode) error {
 	if mode == Exclusive {
 		op = syscall.LOCK_EX
 	}
-	// Blocking flock — no LOCK_NB so the call waits for the lock.
+	// Blocking flock - no LOCK_NB so the call waits for the lock.
 	return syscall.Flock(int(l.f.Fd()), op)
 }
 

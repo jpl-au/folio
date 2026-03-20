@@ -1,7 +1,7 @@
 // Label renaming with in-place patching when possible.
 //
 // When old and new labels have the same byte length, Rename patches
-// _id and _l directly in the data record and index record — no new
+// _id and _l directly in the data record and index record - no new
 // version is created and no history entry is added. When lengths
 // differ, it falls back to appending a new record+index and blanking
 // the old ones (equivalent to Set+Delete but under a single lock hold).
@@ -131,7 +131,7 @@ func (db *DB) rename(old, new string) error {
 // findIndex locates the current index record for a label. Returns nil
 // Result if the document doesn't exist.
 func (db *DB) findIndex(id, lbl string, s source) (*Result, *Index, error) {
-	// In-memory index — direct offset lookup.
+	// In-memory index - direct offset lookup.
 	if db.index != nil {
 		off, ok := db.index[id]
 		if !ok {

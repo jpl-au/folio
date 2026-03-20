@@ -11,7 +11,7 @@
 // as a stdlib-only fallback for environments that cannot use cgo or
 // external dependencies. Blake2b is offered for users who want
 // cryptographic-quality distribution to minimise collision probability,
-// at the cost of ~10x slower hashing — relevant only for very large
+// at the cost of ~10x slower hashing - relevant only for very large
 // databases where birthday-bound collisions on 64-bit hashes become
 // a concern.
 package folio
@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	AlgXXHash3 = 1 // default — fastest, good distribution
+	AlgXXHash3 = 1 // default - fastest, good distribution
 	AlgFNV1a   = 2 // stdlib only, no external dependencies
 	AlgBlake2b = 3 // cryptographic quality distribution
 )

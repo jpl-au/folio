@@ -4,7 +4,7 @@
 // It stores the hash algorithm, section boundaries (State[stHeap],
 // State[stIndex]), and a dirty flag (Error) used for crash recovery. Every
 // read operation depends on correct header values to find the sorted and
-// sparse regions — a wrong heap offset would cause binary search to read
+// sparse regions - a wrong heap offset would cause binary search to read
 // data records as indexes, returning garbage offsets to Get.
 //
 // These tests verify: encoding produces exactly 128 bytes, round-trip
@@ -57,7 +57,7 @@ func TestHeaderEncode(t *testing.T) {
 
 // TestHeaderEncodeFreshDB verifies encoding when State offsets are zero
 // (no compaction has occurred). The JSON must still pad to exactly 128
-// bytes — if the padding logic assumed non-zero section offsets, a fresh
+// bytes - if the padding logic assumed non-zero section offsets, a fresh
 // database would have a short header and every subsequent write would
 // land at the wrong file position.
 func TestHeaderEncodeFreshDB(t *testing.T) {
@@ -175,7 +175,7 @@ func TestHeaderDirtyFlag(t *testing.T) {
 // TestHeaderDirtyPosition verifies that the dirty flag lives at byte
 // offset 13 in the file. The dirty() function uses writeAt to flip a
 // single byte ('0'→'1') rather than re-encoding the full 128-byte
-// header — this is an intentional optimisation because dirty() is called
+// header - this is an intentional optimisation because dirty() is called
 // on every write. If the byte position drifted (e.g. due to a new JSON
 // field being added before _e), dirty() would overwrite an unrelated
 // field and the flag would never be detected on recovery.
@@ -275,7 +275,7 @@ func TestHeaderCorruptHeapAfterIndex(t *testing.T) {
 
 // TestHeaderCorruptJSON verifies that header() returns ErrCorruptHeader
 // when the first 128 bytes are not valid JSON. This is the very first
-// check Open performs — if it accepted garbage, every subsequent read
+// check Open performs - if it accepted garbage, every subsequent read
 // would use uninitialised section boundaries (all zero), causing binary
 // search to operate on an empty range and sparse scan to start from
 // byte 0, reading the header as a data record.
@@ -299,7 +299,7 @@ func TestHeaderCorruptJSON(t *testing.T) {
 
 // TestHeaderAllAlgorithms verifies that every supported hash algorithm
 // survives a header round-trip. The algorithm field controls which hash
-// function is used for ID generation and index lookups — if encoding
+// function is used for ID generation and index lookups - if encoding
 // lost the algorithm value, a reopened database would use the default
 // (xxHash3) regardless of what was configured, producing different IDs
 // for the same labels and making all existing documents unfindable.

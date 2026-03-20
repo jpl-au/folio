@@ -1,9 +1,9 @@
 # Folio
 
-*From the Latin folium — a leaf or page of a manuscript.*
+*From the Latin folium - a leaf or page of a manuscript.*
 
 A JSONL document store where the file is the interface. One `.folio` file
-holds your data as plain text — readable by `grep`, `jq`, any JSONL-capable
+holds your data as plain text - readable by `grep`, `jq`, any JSONL-capable
 tool, or an LLM, without the engine running. The Go library adds binary
 search, concurrent access, and automatic versioning on top of the same file.
 
@@ -90,7 +90,7 @@ subsequent lines are records distinguished by the `_r` field:
 {"_r":1,"_id":"a1b2c3d4e5f6g7h8","_ts":1706000000000,"_o":128,"_l":"my-doc"}                 <- Index record
 ```
 
-Current content lives in `_d` and is plaintext — grep-searchable directly.
+Current content lives in `_d` and is plaintext - grep-searchable directly.
 Previous versions are Zstd-compressed and Ascii85-encoded in the `_h` field,
 retrievable through the History API or any language with Zstd and Ascii85
 support.
@@ -115,7 +115,7 @@ db.Count() int                               // Document count (no I/O, lock-fre
 ### Iterators
 
 All, Search, List, MatchLabel, and History return `iter.Seq2` iterators. Results
-stream lazily — break from the range loop to stop early without scanning the
+stream lazily - break from the range loop to stop early without scanning the
 rest of the file.
 
 ```go
@@ -130,7 +130,7 @@ Search uses a literal fast path for patterns without regex metacharacters:
 the query is JSON-escaped and matched with `bytes.Contains` against the raw
 file content, avoiding both regex overhead and per-record JSON unescaping.
 Patterns containing regex metacharacters (`.*+?()[]{}|\^$`) fall back to
-`regexp.Match`. The fast path is transparent — callers don't need to know
+`regexp.Match`. The fast path is transparent - callers don't need to know
 which path runs.
 
 ### Maintenance
@@ -175,7 +175,7 @@ since they are dominated by JSON parsing rather than I/O.
 
 The mapping is read-only (`PROT_READ | MAP_SHARED`) and remapped
 automatically after writes. Writes always go through the file descriptor.
-Unix only — on other platforms, `Open` silently ignores the option.
+Unix only - on other platforms, `Open` silently ignores the option.
 
 ### In-Memory Index
 
@@ -197,26 +197,26 @@ filter is a lighter alternative that only accelerates negative lookups.
 
 ## Design
 
-Folio is optimised for **short-lived processes** — a CLI tool or script
+Folio is optimised for **short-lived processes** - a CLI tool or script
 that opens a file, reads or writes, and closes. All state lives on disk:
 no in-memory indexes survive between invocations, no background threads,
 no caches beyond an optional bloom filter built fresh at `Open`. Every
 operation works by streaming the file or seeking to known byte positions.
 
 This is deliberate. Features you might expect from a long-running database
-— event systems, subscription channels, persistent in-memory indexes,
-write-behind caches — are absent because the current design target does
+ -  event systems, subscription channels, persistent in-memory indexes,
+write-behind caches - are absent because the current design target does
 not benefit from them. A process that opens a file for one lookup and
 closes it would pay the cost of building these structures without ever
 recouping the investment.
 
 The roadmap has three phases:
 
-1. **Short-lived processes** (current) — disk I/O is the critical path.
+1. **Short-lived processes** (current) - disk I/O is the critical path.
    Open, operate, close. No persistent memory structures.
-2. **Bridging** (in progress) — features useful to both short-lived and
+2. **Bridging** (in progress) - features useful to both short-lived and
    long-running processes: batch writes and memory-mapped I/O.
-3. **Long-running processes** — memory-oriented features where a process
+3. **Long-running processes** - memory-oriented features where a process
    holds the database open for an extended period: cached statistics,
    event hooks, watch/subscribe.
 

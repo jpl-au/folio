@@ -61,7 +61,7 @@ func makeRecord(id, label string) string {
 
 // TestScanFindExisting verifies that binary search finds a record in
 // the middle of a three-record file. This is the core lookup path for
-// Get after compaction — if binary search compared IDs at the wrong
+// Get after compaction - if binary search compared IDs at the wrong
 // byte offset, it would miss the target and return nil.
 func TestScanFindExisting(t *testing.T) {
 	// Sorted index records
@@ -108,7 +108,7 @@ func TestScanEmptyRange(t *testing.T) {
 
 // TestScanFirstRecord verifies that binary search finds the first
 // record in the range. The midpoint calculation must not skip the
-// first line — an off-by-one that started at line 2 would miss
+// first line - an off-by-one that started at line 2 would miss
 // documents whose ID sorts first.
 func TestScanFirstRecord(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
@@ -124,7 +124,7 @@ func TestScanFirstRecord(t *testing.T) {
 }
 
 // TestScanLastRecord verifies that binary search finds the last record.
-// The upper-bound logic must not stop one line short — if it did,
+// The upper-bound logic must not stop one line short - if it did,
 // documents whose ID sorts last would be unreachable.
 func TestScanLastRecord(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
@@ -158,7 +158,7 @@ func TestScanWrongType(t *testing.T) {
 
 // TestScanBackFindRecord verifies that scanBack finds the last record
 // when scanning backwards from the end. scanBack is used by the
-// sorted-section search when binary search lands past the target — it
+// sorted-section search when binary search lands past the target - it
 // must return the nearest valid record before the position.
 func TestScanBackFindRecord(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
@@ -177,7 +177,7 @@ func TestScanBackFindRecord(t *testing.T) {
 }
 
 // TestScanBackNoRecord verifies that scanBack returns nil for an empty
-// file. This is the termination condition — without it, scanBack would
+// file. This is the termination condition - without it, scanBack would
 // read past offset 0 and panic.
 func TestScanBackNoRecord(t *testing.T) {
 	f := createScanTestFile(t, "")
@@ -189,7 +189,7 @@ func TestScanBackNoRecord(t *testing.T) {
 
 // TestScanFwdFindRecord verifies that scanFwd returns the first valid
 // record when scanning forward. scanFwd is used after binary search
-// finds the approximate position — it walks forward to find the exact
+// finds the approximate position - it walks forward to find the exact
 // match.
 func TestScanFwdFindRecord(t *testing.T) {
 	content := makeIndex("0000000000000001", "a") + "\n" +
@@ -291,7 +291,7 @@ func TestSparseSkipsBlanked(t *testing.T) {
 
 // TestScanmExtractMetadata verifies that scanm extracts the type, ID,
 // timestamp, label, and byte offset from fixed positions in the line.
-// scanm reads every line in the file during compaction — it uses byte-
+// scanm reads every line in the file during compaction - it uses byte-
 // position extraction instead of JSON parsing for speed. If the field
 // positions were wrong, compaction would sort records incorrectly and
 // generate indexes pointing to the wrong byte offsets.
@@ -379,7 +379,7 @@ func TestScanmSkipsShortRecords(t *testing.T) {
 // TestByIDThenTS verifies the sort comparator used during compaction.
 // Records must be sorted by ID first (for binary search) then by
 // timestamp (for version ordering within a document). If the sort
-// order were wrong — e.g. timestamp-first — binary search would fail
+// order were wrong - e.g. timestamp-first - binary search would fail
 // because records for the same document would be scattered among
 // records from other documents.
 func TestByIDThenTS(t *testing.T) {

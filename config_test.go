@@ -39,7 +39,7 @@ func TestConfigSyncWrites(t *testing.T) {
 
 // TestConfigHashAlgorithm verifies that each hash algorithm option is
 // accepted, and that the zero value defaults to xxHash3. The algorithm
-// is stored in the header — if the default were wrong, new databases
+// is stored in the header - if the default were wrong, new databases
 // would be created with an invalid algorithm and all Set calls would
 // produce empty IDs.
 func TestConfigHashAlgorithm(t *testing.T) {
@@ -65,7 +65,7 @@ func TestConfigHashAlgorithm(t *testing.T) {
 }
 
 // TestConfigReadBufferDefault verifies that the default read buffer is
-// 64KB. line() allocates this buffer for reading records — too small
+// 64KB. line() allocates this buffer for reading records - too small
 // and large records would require multiple reads, too large and memory
 // usage would spike for many concurrent readers.
 func TestConfigReadBufferDefault(t *testing.T) {
@@ -125,7 +125,7 @@ func TestMaxRecordSizeConstant(t *testing.T) {
 }
 
 // TestVeryLargeContent verifies that a 5MB document round-trips
-// correctly. This exercises the read buffer growth path in line() — if
+// correctly. This exercises the read buffer growth path in line() - if
 // the initial 64KB buffer is too small, line() must grow it until the
 // entire record fits. A bug in the growth logic would truncate large
 // records, returning partial content.

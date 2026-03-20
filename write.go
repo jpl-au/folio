@@ -43,7 +43,7 @@ func (db *DB) raw(line []byte) (int64, error) {
 
 // append writes a data Record and its Index as a single batch. Both are
 // concatenated into one buffer so a single WriteAt call places them
-// adjacently — if the process crashes mid-write, repair will discard
+// adjacently - if the process crashes mid-write, repair will discard
 // any incomplete trailing line. Returns the data offset and index offset.
 func (db *DB) append(record *Record, idx *Index) (int64, int64, error) {
 	rData, err := json.Marshal(record)

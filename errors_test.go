@@ -2,7 +2,7 @@
 //
 // Folio defines a set of named errors (ErrNotFound, ErrCorruptRecord,
 // etc.) that callers use with errors.Is to decide how to handle failures.
-// Each error maps to a specific failure mode — if two errors shared the
+// Each error maps to a specific failure mode - if two errors shared the
 // same message or if one were accidentally nil, callers would take the
 // wrong recovery action (e.g. treating a corrupt file as "not found"
 // and silently creating a new database).
@@ -52,7 +52,7 @@ func TestErrors(t *testing.T) {
 
 // TestErrorsAreErrors verifies that errors.Is works with each sentinel.
 // Folio's errors are created with errors.New, which returns a pointer
-// type — errors.Is uses pointer identity for comparison. If an error
+// type - errors.Is uses pointer identity for comparison. If an error
 // were accidentally redeclared as a string value, errors.Is would fail
 // and callers couldn't match it.
 func TestErrorsAreErrors(t *testing.T) {

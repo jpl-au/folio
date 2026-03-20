@@ -15,7 +15,7 @@ A folio file contains a header and three record types:
 
 - **Header**: file metadata and section boundary offsets (fixed 128 bytes, space-padded)
 - **Data records** (`_r=2`): current document content in `_d`, compressed snapshot in `_h`
-- **History records** (`_r=3`): previous versions — `_d` is blanked, `_h` holds the compressed content
+- **History records** (`_r=3`): previous versions - `_d` is blanked, `_h` holds the compressed content
 - **Index records** (`_r=1`): point to the byte offset (`_o`) of the current data record
 
 ## What's Grep-Searchable
@@ -28,7 +28,7 @@ A folio file contains a header and three record types:
 | Timestamps | Yes | `_ts` |
 | Previous versions | No | `_h` (Zstd-compressed, Ascii85-encoded) |
 
-Historical content is compressed in the `_h` field. This is intentional — casual grep won't accidentally surface old versions, but the History API retrieves them.
+Historical content is compressed in the `_h` field. This is intentional - casual grep won't accidentally surface old versions, but the History API retrieves them.
 
 ## Common Commands
 

@@ -2,7 +2,7 @@
 //
 // Every line in the database file is a JSON object beginning with {"_r":N
 // where N identifies the record type. This fixed prefix allows type detection
-// and ID extraction at known byte offsets without JSON parsing — critical for
+// and ID extraction at known byte offsets without JSON parsing - critical for
 // binary search and compaction where millions of records may be scanned.
 //
 // Three types coexist in the file:
@@ -68,7 +68,7 @@ type Result struct {
 }
 
 // Entry holds lightweight metadata extracted by scanm. Full JSON parsing
-// is skipped — fields are read at fixed byte positions. DstOff is zero
+// is skipped - fields are read at fixed byte positions. DstOff is zero
 // until compaction fills it with the record's new position in the output.
 type Entry struct {
 	ID     string
@@ -85,7 +85,7 @@ type Entry struct {
 // the same order, so type, ID, and timestamp can be read at known offsets
 // without JSON parsing.
 const (
-	TypePos       = 6  // {"_r":N — type digit position
+	TypePos       = 6  // {"_r":N - type digit position
 	IDStart       = 15 // first byte of the 16-char hex ID
 	IDEnd         = 31 // one past the last byte of the ID
 	TSStart       = 39 // first byte of the 13-digit timestamp

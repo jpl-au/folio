@@ -2,12 +2,12 @@
 //
 // All three algorithms produce a 16 hex character (8 byte) _id, and the _id
 // field sits at a fixed byte offset in every record. This means Rehash can
-// overwrite each _id in place without moving or resizing any records —
+// overwrite each _id in place without moving or resizing any records  - 
 // no temp file, no rewrite, just a linear scan with targeted byte patches.
 //
 // The dirty flag is set before any patches begin and cleared after the
 // header is updated. A crash mid-rehash leaves the flag set, so the next
-// Open triggers automatic Repair — which rebuilds all IDs from labels,
+// Open triggers automatic Repair - which rebuilds all IDs from labels,
 // restoring consistency regardless of how many patches completed.
 package folio
 
@@ -61,7 +61,7 @@ func (db *DB) Rehash(newAlg int) error {
 		return fmt.Errorf("rehash: sync: %w", err)
 	}
 
-	// All patches and the header are on disk — clear the dirty flag.
+	// All patches and the header are on disk - clear the dirty flag.
 	if err := dirty(db.writer, false); err != nil {
 		return fmt.Errorf("rehash: clear dirty: %w", err)
 	}

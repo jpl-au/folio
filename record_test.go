@@ -21,7 +21,7 @@ import (
 )
 
 // TestRecordTypeConstants guards the numeric values stored in every
-// record's "_r" field. These values are persisted on disk — if
+// record's "_r" field. These values are persisted on disk - if
 // TypeRecord changed from 2 to something else, existing databases
 // would misidentify every data record.
 func TestRecordTypeConstants(t *testing.T) {
@@ -82,7 +82,7 @@ func TestDecodeIndexRecord(t *testing.T) {
 
 // TestDecodeDataRecord verifies that decode() correctly parses a type-2
 // (Record) line including the Data and History fields. These fields
-// carry the actual document content and compressed version history —
+// carry the actual document content and compressed version history  - 
 // if they were swapped or truncated, Get would return history data as
 // content or History would fail to decompress.
 func TestDecodeDataRecord(t *testing.T) {
@@ -151,7 +151,7 @@ func TestDecodeIndexRecordWithDecodeIndex(t *testing.T) {
 
 // TestDecodeInvalidJSON verifies that decode() returns ErrCorruptRecord
 // for invalid JSON rather than a zero-value Record. A zero-value would
-// have Type=0, which doesn't match any valid type — but callers might
+// have Type=0, which doesn't match any valid type - but callers might
 // not check for that, leading to silent misclassification.
 func TestDecodeInvalidJSON(t *testing.T) {
 	_, err := decode([]byte(`{invalid`))
@@ -258,7 +258,7 @@ func TestNowIncreases(t *testing.T) {
 
 // TestUnescape exercises the JSON string unescaper used by the label()
 // fast path and Search content matching. JSON strings can contain
-// escape sequences like \" \\ \n \uXXXX — if unescape() missed any of
+// escape sequences like \" \\ \n \uXXXX - if unescape() missed any of
 // these, labels or content containing special characters would fail to
 // match, making affected documents invisible to Search and causing
 // label mismatches during compaction.

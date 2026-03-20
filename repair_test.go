@@ -9,7 +9,7 @@
 // This rebuild is the only way to reclaim space from deleted documents
 // and to move sparse-region records into the sorted section where they
 // can be found via O(log n) binary search instead of O(n) linear scan.
-// Getting it wrong means data loss — so these tests verify that every
+// Getting it wrong means data loss - so these tests verify that every
 // document, every version, and every history snapshot survives the
 // rebuild, that section boundaries are set correctly, and that the
 // database is fully operational after repair completes.
@@ -118,8 +118,8 @@ func TestRepairUpdatesHeader(t *testing.T) {
 
 // TestRepairDataStillAccessible is the end-to-end smoke test: write
 // three documents, compact, then Get each one. This catches any bug
-// in the rebuild pipeline — sorting, index generation, header update,
-// file replacement — that would cause a previously-accessible document
+// in the rebuild pipeline - sorting, index generation, header update,
+// file replacement - that would cause a previously-accessible document
 // to become unreachable after compaction.
 func TestRepairDataStillAccessible(t *testing.T) {
 	db := openTestDB(t)
@@ -175,7 +175,7 @@ func TestCompactPreservesHistory(t *testing.T) {
 
 // TestPurgeRemovesHistory verifies that Purge keeps only the latest
 // version of each document while leaving the current version accessible.
-// This is the destructive counterpart to Compact — if Purge accidentally
+// This is the destructive counterpart to Compact - if Purge accidentally
 // kept history or accidentally deleted the current version, users would
 // either waste space or lose their data.
 func TestPurgeRemovesHistory(t *testing.T) {
@@ -247,7 +247,7 @@ func TestRepairAfterDelete(t *testing.T) {
 // TestRepairSparseEmptyAfter verifies that compaction moves all sparse
 // records into the sorted section, leaving the sparse region empty
 // (tail == State[stIndex]). If sparse records were left behind, they
-// would be duplicated — once in the sorted section and once in sparse —
+// would be duplicated - once in the sorted section and once in sparse  - 
 // causing Get to return stale versions and History to show duplicates.
 func TestRepairSparseEmptyAfter(t *testing.T) {
 	db := openTestDB(t)
@@ -266,7 +266,7 @@ func TestRepairSparseEmptyAfter(t *testing.T) {
 // readers and writers, providing a consistent snapshot at the cost of
 // availability. Without this option, Repair uses StateRead (allowing
 // concurrent reads). The test verifies data integrity after a
-// blocking repair — if the file replacement step were not atomic,
+// blocking repair - if the file replacement step were not atomic,
 // a reader that snuck in during the swap would read a partial file.
 func TestRepairBlockReaders(t *testing.T) {
 	db := openTestDB(t)
@@ -447,7 +447,7 @@ func TestRepairCrashDuringUpdate(t *testing.T) {
 // with a valid index still pointing to it. Before the fix, repair
 // would write an index with Offset: 0 (pointing at the header).
 // The fix derives indexes from records: no type 2 record for this
-// label means no output index — the document is treated as deleted.
+// label means no output index - the document is treated as deleted.
 func TestRepairCrashDuringDelete(t *testing.T) {
 	db := openTestDB(t)
 

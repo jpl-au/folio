@@ -3,9 +3,9 @@
 // These benchmarks measure the throughput of every major operation under
 // controlled conditions. They serve two purposes:
 //
-//  1. Regression detection — if a code change makes Set 2x slower, the
+//  1. Regression detection - if a code change makes Set 2x slower, the
 //     benchmark numbers will catch it before it ships.
-//  2. Bloom filter evaluation — paired benchmarks (Bloom vs NoBloom)
+//  2. Bloom filter evaluation - paired benchmarks (Bloom vs NoBloom)
 //     quantify the speedup from the optional bloom filter on miss-heavy
 //     workloads, helping users decide whether to enable it.
 //

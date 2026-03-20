@@ -78,7 +78,7 @@ type DB struct {
 
 // Section boundary helpers. These translate header offsets into the ranges
 // passed to scan (binary search) and sparse (linear scan). A zero header
-// offset means the section is empty — we fall back to HeaderSize so scans
+// offset means the section is empty - we fall back to HeaderSize so scans
 // start at the first possible record position.
 //
 // File layout after compaction:
@@ -111,7 +111,7 @@ func (db *DB) src() source {
 }
 
 // remap replaces the current memory mapping with one covering the
-// full file. Must be called with db.mu held for writing — readers
+// full file. Must be called with db.mu held for writing - readers
 // hold references to the mapped slice via src(), and munmap would
 // invalidate them.
 func (db *DB) remap() error {

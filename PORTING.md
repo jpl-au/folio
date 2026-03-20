@@ -1,14 +1,14 @@
 # Porting Guide
 
 This document describes the folio file format and the mechanics behind it.
-Everything here is language-agnostic — the reference implementation is Go,
+Everything here is language-agnostic - the reference implementation is Go,
 but a correct implementation can be written in any language with file I/O,
 JSON, Zstd, and Ascii85 support.
 
 ## Design Principle
 
 The file is the interface. A `.folio` file is valid JSONL. Any tool that
-can read lines of JSON — grep, jq, Python, a shell script, an LLM — can
+can read lines of JSON - grep, jq, Python, a shell script, an LLM - can
 query the data without the engine. The engine adds performance (binary
 search, bloom filters) and safety (locking, crash recovery), but the file
 is always self-describing and independently readable.
@@ -26,7 +26,7 @@ Previous versions are compressed so they don't pollute search results.
 ```
 
 After a fresh `Open` with no compaction, the heap and index sections are
-empty — everything is sparse. After `Compact`, records are sorted into the
+empty - everything is sparse. After `Compact`, records are sorted into the
 heap and index, and the sparse section is empty. Normal operation appends
 to sparse; compaction periodically reorganises.
 
@@ -96,7 +96,7 @@ The current content of a document.
 ### History Record (_r=3)
 
 A previous version. Created when a document is updated: the old data record
-is patched in place — type byte changed from `2` to `3`, `_d` field
+is patched in place - type byte changed from `2` to `3`, `_d` field
 overwritten with spaces (preserving byte offsets), `_h` field left intact.
 
 ```json
@@ -133,7 +133,7 @@ parsing:
 This is critical for performance: binary search and compaction read type, ID,
 and timestamp from raw bytes without deserialising the full JSON. An
 implementation that doesn't need this optimisation can parse the JSON
-normally — the data is the same either way.
+normally - the data is the same either way.
 
 ## ID Generation
 
@@ -152,7 +152,7 @@ xxHash3 is the default because it has the best throughput for short strings
 (document labels) and excellent distribution. FNV-1a is a stdlib-only
 fallback for environments that cannot use external dependencies. Blake2b
 offers cryptographic-quality distribution to minimise collision probability
-at the cost of ~10x slower hashing — relevant only for very large databases
+at the cost of ~10x slower hashing - relevant only for very large databases
 where birthday-bound collisions on 64-bit hashes become a concern.
 
 A port only needs to support one algorithm to read and write files. To
@@ -171,7 +171,7 @@ A `Get(label)` proceeds in two phases:
    If the latest record is a delete (data record with empty `_d`), return
    not found.
 
-Sparse overrides sorted — a write after compaction takes precedence over
+Sparse overrides sorted - a write after compaction takes precedence over
 the compacted data.
 
 ### Binary Search
@@ -261,7 +261,7 @@ On `Open`, if the dirty flag is set or a `.tmp` file exists, the previous
 session did not shut down cleanly. Recovery:
 
 1. Delete the `.tmp` file if present (it's an incomplete compaction).
-2. Run `Repair` under an exclusive lock — this is a full compaction that
+2. Run `Repair` under an exclusive lock - this is a full compaction that
    rebuilds the file from surviving records.
 3. Incomplete lines (no trailing newline) are silently discarded.
 

@@ -3,7 +3,7 @@
 // Over time, appends accumulate in the sparse region and lookups degrade
 // toward linear scans. Repair reads every record, sorts by ID, and writes
 // a new file with a contiguous heap (data + history sorted by ID then
-// timestamp) followed by sorted indexes — restoring O(log n) binary
+// timestamp) followed by sorted indexes - restoring O(log n) binary
 // search. It also serves as crash recovery: on Open, if a .tmp file or
 // dirty flag is found, Repair is run automatically to restore consistency.
 //
@@ -93,7 +93,7 @@ func (db *DB) Repair(opts *CompactOptions) error {
 		return err
 	}
 
-	// Phase 2: swap file handles — brief exclusive lock
+	// Phase 2: swap file handles - brief exclusive lock
 	if !opts.BlockReaders {
 		db.mu.RUnlock()
 		db.mu.Lock()
@@ -165,14 +165,14 @@ func (db *DB) Repair(opts *CompactOptions) error {
 // write depending on BlockReaders). On success it syncs and closes tmp, and
 // returns the byte offset of the sparse region start for db.tail.
 //
-// Indexes in the input file are ignored entirely — they may be stale or
+// Indexes in the input file are ignored entirely - they may be stale or
 // orphaned after a crash. Output indexes are derived from the type 2
 // records actually written to the heap. See audit.md for details.
 func (db *DB) rebuild(tmp *os.File, opts *CompactOptions) (int64, error) {
 	s := source{db.reader, db.tail}
 	entries := scanm(s, HeaderSize, s.sz, 0)
 
-	// Collect data and history records only — input indexes are discarded.
+	// Collect data and history records only - input indexes are discarded.
 	records := make([]Entry, 0, len(entries))
 	for _, e := range entries {
 		if e.Type == TypeIndex {

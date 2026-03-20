@@ -46,7 +46,7 @@ func openTestDB(t *testing.T) *DB {
 }
 
 // TestOpenCreateNew verifies that Open creates a new file when the path
-// doesn't exist. This is the first-run experience — if Open required
+// doesn't exist. This is the first-run experience - if Open required
 // the file to already exist, users would need a separate create step.
 func TestOpenCreateNew(t *testing.T) {
 	dir := t.TempDir()
@@ -145,7 +145,7 @@ func TestSetGet(t *testing.T) {
 // TestSetUpdate verifies that Set on an existing label returns the new
 // content. Set must blank the old index so Get finds the new version.
 // If the old index weren't blanked, Get would return whichever version
-// it found first — potentially the stale one.
+// it found first - potentially the stale one.
 func TestSetUpdate(t *testing.T) {
 	db := openTestDB(t)
 
@@ -369,7 +369,7 @@ func TestListAfterDelete(t *testing.T) {
 }
 
 // TestAll verifies that All returns every document with correct content.
-// This is the single-pass alternative to List+Get — if All missed any
+// This is the single-pass alternative to List+Get - if All missed any
 // document or returned wrong content, export and backup use cases would
 // produce incomplete or corrupt output.
 func TestAll(t *testing.T) {
@@ -1022,7 +1022,7 @@ func TestRehash(t *testing.T) {
 
 // TestLargeContent verifies that 1 MB of content survives a Set→Get
 // round-trip. Large content exercises the line() reader's buffer
-// growth path — if the ReadBuffer (default 64 KB) weren't expanded
+// growth path - if the ReadBuffer (default 64 KB) weren't expanded
 // when the record exceeds it, line() would return a truncated record
 // and Get would decode garbage.
 func TestLargeContent(t *testing.T) {
@@ -1176,7 +1176,7 @@ func TestAutoCompactConfigOverride(t *testing.T) {
 		t.Errorf("State[stThreshold] = %d, want 25", db2.header.State[stThreshold])
 	}
 
-	// Close and re-open with Config{} — the 25 should have been
+	// Close and re-open with Config{} - the 25 should have been
 	// written to the header and should survive without being repeated.
 	db2.Close()
 
@@ -1206,7 +1206,7 @@ func TestAutoCompactDeleteDoesNotCount(t *testing.T) {
 
 	// Delete should not have pushed the counter to 5.
 	if db.header.State[stHeap] != 0 {
-		t.Error("compaction should not fire — Delete does not increment stWrites")
+		t.Error("compaction should not fire - Delete does not increment stWrites")
 	}
 
 	// One more Set should reach 5 and trigger compaction.

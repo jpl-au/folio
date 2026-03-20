@@ -2,11 +2,11 @@
 //
 // Search scans data records (_r=2) and matches against the _d field.
 // After compaction the file has three sections: heap (data + history),
-// index, and sparse. Search only needs the heap and sparse regions —
+// index, and sparse. Search only needs the heap and sparse regions  - 
 // the index section contains no _d fields. The scan skips the index
 // section entirely by reading [HeaderSize..heapEnd) then [sparseStart..EOF).
 // Before any compaction both boundaries are zero, so the first range is
-// empty and the second covers the whole file — identical to a full scan.
+// empty and the second covers the whole file - identical to a full scan.
 //
 // Literal patterns (no regex metacharacters) take a fast path: the query
 // is JSON-escaped and matched with bytes.Contains, avoiding both regex
@@ -47,7 +47,7 @@ import (
 )
 
 // SearchOptions configures Search behaviour. Callers control result count
-// by breaking out of the range loop — no Limit field is needed.
+// by breaking out of the range loop - no Limit field is needed.
 type SearchOptions struct {
 	CaseSensitive bool
 	Decode        bool // unescape JSON string escapes in _d before matching; bypasses literal fast path
